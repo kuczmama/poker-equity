@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Systematic Debug Test</title>
+</head>
+<body>
+    <h1>Systematic Debug Test</h1>
+    <div id="results"></div>
+    
+    <script src="poker-logic.js"></script>
+    <script>
+        console.log('Systematic debugging...');
+        
+        // Test the exact scenario that should give TT ~54% equity
+        const hand1 = new PokerHand('TT');
+        const hand2 = new PokerHand('AKs');
+        
+        console.log('Hand 1 (TT):', hand1);
+        console.log('Hand 2 (AKs):', hand2);
+        
+        console.log('Hand 1 combinations:', hand1.getAllPossibleCards());
+        console.log('Hand 2 combinations:', hand2.getAllPossibleCards());
+        
+        // Test a specific scenario
+        const hand1Cards = [{rank: 10, suit: 'h'}, {rank: 10, suit: 'd'}];
+        const hand2Cards = [{rank: 14, suit: 's'}, {rank: 13, suit: 's'}];
+        const board = [
+            {rank: 12, suit: 'c'}, 
+            {rank: 11, suit: 'c'}, 
+            {rank: 9, suit: 's'}, 
+            {rank: 8, suit: 'h'}, 
+            {rank: 7, suit: 'd'}
+        ];
+        
+        console.log('Testing specific scenario:');
+        console.log('TT cards:', hand1Cards);
+        console.log('AKs cards:', hand2Cards);
+        console.log('Board:', board);
+        
+        const hand1Best = OddsCalculator.findBestHand([...hand1Cards, ...board]);
+        const hand2Best = OddsCalculator.findBestHand([...hand2Cards, ...board]);
+        
+        console.log('TT best hand:', hand1Best);
+        console.log('AKs best hand:', hand2Best);
+        
+        const result = HandEvaluator.compareHands(hand1Best, hand2Best);
+        console.log('Comparison result:', result);
+        
+        // Test a few more scenarios
+        const scenarios = [
+            {
+                board: [{rank: 14, suit: 'c'}, {rank: 13, suit: 'h'}, {rank: 12, suit: 'd'}, {rank: 11, suit: 's'}, {rank: 10, suit: 'c'}],
+                description: 'A-K-Q-J-T board (both make straights)'
+            },
+            {
+                board: [{rank: 9, suit: 'c'}, {rank: 8, suit: 'h'}, {rank: 7, suit: 'd'}, {rank: 6, suit: 's'}, {rank: 5, suit: 'c'}],
+                description: '9-8-7-6-5 board (TT makes pair, AKs high card)'
+            },
+            {
+                board: [{rank: 14, suit: 'c'}, {rank: 13, suit: 'h'}, {rank: 12, suit: 'd'}, {rank: 9, suit: 's'}, {rank: 8, suit: 'c'}],
+                description: 'A-K-Q-9-8 board (TT makes pair, AKs makes pair)'
+            }
+        ];
+        
+        let results = '<h2>Systematic Test Results:</h2>';
+        
+        scenarios.forEach((scenario, index) => {
+            const h1Best = OddsCalculator.findBestHand([...hand1Cards, ...scenario.board]);
+            const h2Best = OddsCalculator.findBestHand([...hand2Cards, ...scenario.board]);
+            const comp = HandEvaluator.compareHands(h1Best, h2Best);
+            
+            console.log(`Scenario ${index + 1}:`, scenario.description);
+            console.log('TT:', h1Best);
+            console.log('AKs:', h2Best);
+            console.log('Result:', comp);
+            
+            results += `
+                <h3>Scenario ${index + 1}: ${scenario.description}</h3>
+                <p><strong>TT:</strong> ${h1Best.type} (${h1Best.strength})</p>
+                <p><strong>AKs:</strong> ${h2Best.type} (${h2Best.strength})</p>
+                <p><strong>Winner:</strong> ${comp > 0 ? 'TT' : comp < 0 ? 'AKs' : 'Tie'} (${comp})</p>
+            `;
+        });
+        
+        document.getElementById('results').innerHTML = results;
+    </script>
+</body>
+</html>

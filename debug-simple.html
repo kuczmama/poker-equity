@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Debug Test</title>
+</head>
+<body>
+    <h1>Debug Test - Simple Hand Evaluation</h1>
+    <div id="results"></div>
+    
+    <script src="poker-logic.js"></script>
+    <script>
+        console.log('Testing simple hand evaluation...');
+        
+        // Test basic hand evaluation
+        const testCards1 = [
+            {rank: 10, suit: 'h'}, {rank: 10, suit: 'd'}, 
+            {rank: 14, suit: 'c'}, {rank: 13, suit: 'c'}, {rank: 12, suit: 's'}
+        ];
+        
+        const testCards2 = [
+            {rank: 14, suit: 's'}, {rank: 13, suit: 's'}, 
+            {rank: 14, suit: 'c'}, {rank: 13, suit: 'c'}, {rank: 12, suit: 's'}
+        ];
+        
+        const hand1Eval = HandEvaluator.evaluateHand(testCards1);
+        const hand2Eval = HandEvaluator.evaluateHand(testCards2);
+        
+        console.log('Hand 1 evaluation (TT with AKQ board):', hand1Eval);
+        console.log('Hand 2 evaluation (AKs with AKQ board):', hand2Eval);
+        
+        const comparison = HandEvaluator.compareHands(hand1Eval, hand2Eval);
+        console.log('Comparison result:', comparison);
+        console.log('Positive means hand1 wins, negative means hand2 wins, 0 means tie');
+        
+        // Test a few more scenarios
+        const testCards3 = [
+            {rank: 10, suit: 'h'}, {rank: 10, suit: 'd'}, 
+            {rank: 9, suit: 'c'}, {rank: 8, suit: 'c'}, {rank: 7, suit: 's'}
+        ];
+        
+        const testCards4 = [
+            {rank: 14, suit: 's'}, {rank: 13, suit: 's'}, 
+            {rank: 9, suit: 'c'}, {rank: 8, suit: 'c'}, {rank: 7, suit: 's'}
+        ];
+        
+        const hand3Eval = HandEvaluator.evaluateHand(testCards3);
+        const hand4Eval = HandEvaluator.evaluateHand(testCards4);
+        
+        console.log('Hand 3 evaluation (TT with 987 board):', hand3Eval);
+        console.log('Hand 4 evaluation (AKs with 987 board):', hand4Eval);
+        
+        const comparison2 = HandEvaluator.compareHands(hand3Eval, hand4Eval);
+        console.log('Comparison 2 result:', comparison2);
+        
+        document.getElementById('results').innerHTML = `
+            <h2>Test Results:</h2>
+            <p><strong>TT vs AKs on AKQ board:</strong></p>
+            <p>TT: ${JSON.stringify(hand1Eval)}</p>
+            <p>AKs: ${JSON.stringify(hand2Eval)}</p>
+            <p>Result: ${comparison} (${comparison > 0 ? 'TT wins' : comparison < 0 ? 'AKs wins' : 'Tie'})</p>
+            
+            <p><strong>TT vs AKs on 987 board:</strong></p>
+            <p>TT: ${JSON.stringify(hand3Eval)}</p>
+            <p>AKs: ${JSON.stringify(hand4Eval)}</p>
+            <p>Result: ${comparison2} (${comparison2 > 0 ? 'TT wins' : comparison2 < 0 ? 'AKs wins' : 'Tie'})</p>
+        `;
+    </script>
+</body>
+</html>

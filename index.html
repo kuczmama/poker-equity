@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Poker Odds Calculator</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#38e07b",
+              "background-light": "#f6f8f7",
+              "background-dark": "#122017",
+            },
+            fontFamily: {
+              display: ["Space Grotesk"],
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+        .hand-preview.valid {
+            color: #38e07b;
+        }
+        .hand-preview.invalid {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+    <div class="flex flex-col min-h-screen">
+        <main class="flex-grow flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+            <div class="w-full max-w-md space-y-8">
+                <div>
+                    <h1 class="text-center text-3xl font-bold text-gray-900 dark:text-white">Texas Hold'em Odds Calculator</h1>
+                    <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">Enter two hands to see their equity.</p>
+                </div>
+                
+                <div class="space-y-6">
+                    <div>
+                        <label class="sr-only" for="hand1">Hand 1</label>
+                        <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="hand1" name="hand1" placeholder="Hand 1 (e.g., AKs, 72o)" required="" type="text" value="22"/>
+                        <div class="hand-preview mt-1 text-xs" id="hand1-preview"></div>
+                    </div>
+                    
+                    <div>
+                        <label class="sr-only" for="hand2">Hand 2</label>
+                        <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="hand2" name="hand2" placeholder="Hand 2 (e.g., QQ, T9s)" required="" type="text" value="AKo"/>
+                        <div class="hand-preview mt-1 text-xs" id="hand2-preview"></div>
+                    </div>
+                    
+                    <div class="text-center text-sm text-gray-500 dark:text-gray-400">
+                        <p>Examples: <button class="example-btn underline hover:text-primary" data-hand1="22" data-hand2="AKo">22 vs AKo</button>, <button class="example-btn underline hover:text-primary" data-hand1="TT" data-hand2="JTs">TT vs JTs</button></p>
+                    </div>
+                    
+                    <button id="calculate-btn" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-lg text-background-dark bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors" type="button">
+                        Calculate Equity
+                    </button>
+                </div>
+                
+                <div class="results mt-8 p-6 bg-gray-50 dark:bg-gray-800/20 rounded-lg" id="results" style="display: none;">
+                    <h3 class="text-lg font-bold text-center text-gray-900 dark:text-white">Results</h3>
+                    
+                    <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4 text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                        <div class="flex justify-between">
+                            <span class="font-medium">Hand Type 1:</span>
+                            <span class="text-gray-900 dark:text-white" id="hand1-type"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="font-medium">Hand Type 2:</span>
+                            <span class="text-gray-900 dark:text-white" id="hand2-type"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="font-medium">Simulation:</span>
+                            <span class="text-gray-900 dark:text-white" id="simulation-info"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6 flex justify-around text-center">
+                        <div>
+                            <p class="text-base font-bold text-gray-900 dark:text-white" id="hand1-info"></p>
+                            <p class="text-3xl font-bold text-primary" id="hand1-equity"></p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500">Win/Split</p>
+                        </div>
+                        <div>
+                            <p class="text-base font-bold text-gray-900 dark:text-white" id="hand2-info"></p>
+                            <p class="text-3xl font-bold text-gray-700 dark:text-gray-300" id="hand2-equity"></p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500">Win/Split</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 h-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div class="h-full bg-primary transition-all duration-1000" id="hand1-progress"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="pokersolver-real.js"></script>
+    <script src="poker-logic.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

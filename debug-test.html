@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Test</title>
+</head>
+<body>
+    <h1>Debug Test - 22 vs AKs</h1>
+    <div id="results"></div>
+    
+    <script src="poker-logic.js"></script>
+    <script>
+        console.log('Debugging 22 vs AKs...');
+        
+        // Test hand parsing
+        const hand1 = new PokerHand('22');
+        const hand2 = new PokerHand('AKs');
+        
+        console.log('Hand 1 (22):', hand1);
+        console.log('Hand 2 (AKs):', hand2);
+        
+        console.log('Hand 1 combinations:', hand1.getAllPossibleCards());
+        console.log('Hand 2 combinations:', hand2.getAllPossibleCards());
+        
+        // Test a single simulation
+        const hand1Combos = hand1.getAllPossibleCards();
+        const hand2Combos = hand2.getAllPossibleCards();
+        
+        console.log('Running single simulation...');
+        const result = OddsCalculator.simulateHand(hand1Combos, hand2Combos);
+        console.log('Single simulation result:', result);
+        
+        // Test hand evaluation
+        const testCards1 = [
+            {rank: 2, suit: 'h'}, {rank: 2, suit: 'd'}, 
+            {rank: 14, suit: 'c'}, {rank: 13, suit: 'c'}, {rank: 12, suit: 's'}
+        ];
+        
+        const testCards2 = [
+            {rank: 14, suit: 's'}, {rank: 13, suit: 's'}, 
+            {rank: 14, suit: 'c'}, {rank: 13, suit: 'c'}, {rank: 12, suit: 's'}
+        ];
+        
+        console.log('Test hand 1 evaluation:', HandEvaluator.evaluateHand(testCards1));
+        console.log('Test hand 2 evaluation:', HandEvaluator.evaluateHand(testCards2));
+        console.log('Comparison result:', HandEvaluator.compareHands(
+            HandEvaluator.evaluateHand(testCards1), 
+            HandEvaluator.evaluateHand(testCards2)
+        ));
+    </script>
+</body>
+</html>

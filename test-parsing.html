@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Parsing Test</title>
+</head>
+<body>
+    <h1>Hand Parsing Test</h1>
+    <div id="results"></div>
+    
+    <script src="poker-logic.js"></script>
+    <script>
+        const testHands = ['22', 'AA', 'AKo', 'AKs', 'AQs', 'QJs', '78s', '65o'];
+        
+        console.log('Testing hand parsing...');
+        
+        let results = '<h2>Hand Parsing Results:</h2><ul>';
+        
+        testHands.forEach(handStr => {
+            try {
+                const hand = new PokerHand(handStr);
+                const handType = hand.getHandType();
+                console.log(`${handStr} -> ${handType}`);
+                results += `<li><strong>${handStr}</strong>: ${handType} ✓</li>`;
+            } catch (error) {
+                console.error(`${handStr} -> ERROR: ${error.message}`);
+                results += `<li><strong>${handStr}</strong>: ERROR - ${error.message} ✗</li>`;
+            }
+        });
+        
+        results += '</ul>';
+        document.getElementById('results').innerHTML = results;
+    </script>
+</body>
+</html>

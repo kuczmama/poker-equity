@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug JTs vs AKo</title>
+</head>
+<body>
+    <h1>Debug JTs vs AKo</h1>
+    <div id="results"></div>
+    
+    <script src="pokersolver.js"></script>
+    <script src="poker-logic.js"></script>
+    <script>
+        console.log('Debugging JTs vs AKo...');
+        
+        // Test hand parsing
+        const hand1 = new PokerHand('JTs');
+        const hand2 = new PokerHand('AKo');
+        
+        console.log('Hand 1 (JTs):', hand1);
+        console.log('Hand 2 (AKo):', hand2);
+        console.log('Hand 1 combinations:', hand1.getAllPossibleCards());
+        console.log('Hand 2 combinations:', hand2.getAllPossibleCards());
+        
+        // Test a specific scenario
+        const hand1Cards = [{rank: 11, suit: 'h'}, {rank: 10, suit: 'h'}]; // JTs
+        const hand2Cards = [{rank: 14, suit: 's'}, {rank: 13, suit: 'd'}]; // AKo
+        
+        console.log('Testing specific cards:');
+        console.log('JTs:', hand1Cards);
+        console.log('AKo:', hand2Cards);
+        
+        // Test different board scenarios
+        const testBoards = [
+            {
+                board: [{rank: 12, suit: 'c'}, {rank: 9, suit: 'c'}, {rank: 8, suit: 's'}, {rank: 7, suit: 'h'}, {rank: 6, suit: 'd'}],
+                description: 'Q-9-8-7-6 board (JTs makes straight, AKo makes high card)'
+            },
+            {
+                board: [{rank: 14, suit: 'c'}, {rank: 13, suit: 'h'}, {rank: 12, suit: 'd'}, {rank: 11, suit: 's'}, {rank: 10, suit: 'c'}],
+                description: 'A-K-Q-J-T board (JTs makes straight, AKo makes straight)'
+            },
+            {
+                board: [{rank: 9, suit: 'c'}, {rank: 8, suit: 'h'}, {rank: 7, suit: 'd'}, {rank: 6, suit: 's'}, {rank: 5, suit: 'c'}],
+                description: '9-8-7-6-5 board (JTs makes straight, AKo makes high card)'
+            },
+            {
+                board: [{rank: 12, suit: 'c'}, {rank: 12, suit: 'h'}, {rank: 9, suit: 'd'}, {rank: 8, suit: 's'}, {rank: 7, suit: 'c'}],
+                description: 'Q-Q-9-8-7 board (JTs makes pair, AKo makes pair)'
+            }
+        ];
+        
+        let results = '<h2>JTs vs AKo Test Results:</h2>';
+        
+        testBoards.forEach((test, index) => {
+            const jtsHand = PokerSolver.evaluateHand([...hand1Cards, ...test.board]);
+            const akoHand = PokerSolver.evaluateHand([...hand2Cards, ...test.board]);
+            const comparison = PokerSolver.compareHands(jtsHand, akoHand);
+            
+            console.log(`Test ${index + 1}: ${test.description}`);
+            console.log('JTs hand:', jtsHand);
+            console.log('AKo hand:', akoHand);
+            console.log('Comparison:', comparison);
+            
+            results += `
+                <h3>Test ${index + 1}: ${test.description}</h3>
+                <p><strong>JTs:</strong> ${jtsHand.name} (rank: ${jtsHand.rank})</p>
+                <p><strong>AKo:</strong> ${akoHand.name} (rank: ${akoHand.rank})</p>
+                <p><strong>Winner:</strong> ${comparison > 0 ? 'JTs' : comparison < 0 ? 'AKo' : 'Tie'} (${comparison})</p>
+            `;
+        });
+        
+        // Run a small simulation to see the trend
+        console.log('Running small simulation...');
+        let jtsWins = 0;
+        let akoWins = 0;
+        let ties = 0;
+        
+        const hand1Combos = hand1.getAllPossibleCards();
+        const hand2Combos = hand2.getAllPossibleCards();
+        
+        for (let i = 0; i < 1000; i++) {
+            const result = OddsCalculator.simulateHand(hand1Combos, hand2Combos);
+            if (result > 0) jtsWins++;
+            else if (result < 0) akoWins++;
+            else ties++;
+        }
+        
+        const total = jtsWins + akoWins + ties;
+        const jtsEquity = (jtsWins + ties / 2) / total * 100;
+        const akoEquity = (akoWins + ties / 2) / total * 100;
+        
+        console.log(`Small simulation results (1000 iterations):`);
+        console.log(`JTs: ${jtsEquity.toFixed(2)}%`);
+        console.log(`AKo: ${akoEquity.toFixed(2)}%`);
+        
+        results += `
+            <h3>Small Simulation (1000 iterations):</h3>
+            <p><strong>JTs:</strong> ${jtsEquity.toFixed(2)}%</p>
+            <p><strong>AKo:</strong> ${akoEquity.toFixed(2)}%</p>
+        `;
+        
+        document.getElementById('results').innerHTML = results;
+    </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Calculator Test</title>
+</head>
+<body>
+    <h1>Testing 22 vs AKo</h1>
+    <div id="results"></div>
+    
+    <script src="poker-logic.js"></script>
+    <script>
+        console.log('Testing 22 vs AKo...');
+        
+        // Test hand parsing
+        const hand1 = new PokerHand('22');
+        const hand2 = new PokerHand('AKo');
+        
+        console.log('Hand 1 (22):', hand1.getHandType());
+        console.log('Hand 2 (AKo):', hand2.getHandType());
+        
+        // Calculate odds
+        const startTime = Date.now();
+        const results = OddsCalculator.calculateOdds('22', 'AKo', 10000);
+        const endTime = Date.now();
+        
+        console.log('Results:', results);
+        console.log(`Calculation took ${endTime - startTime}ms`);
+        
+        // Display results
+        document.getElementById('results').innerHTML = `
+            <h2>22 vs AKo Results</h2>
+            <p><strong>22:</strong> ${results.hand1Equity.toFixed(2)}% equity</p>
+            <p><strong>AKo:</strong> ${results.hand2Equity.toFixed(2)}% equity</p>
+            <p><strong>Expected:</strong> 22 should have ~52.65% equity vs AKo's ~47.35% equity</p>
+            <p><strong>Iterations:</strong> ${results.iterations.toLocaleString()}</p>
+            <p><strong>Calculation Time:</strong> ${endTime - startTime}ms</p>
+        `;
+    </script>
+</body>
+</html>

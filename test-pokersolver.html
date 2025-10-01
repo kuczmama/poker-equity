@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test PokerSolver</title>
+</head>
+<body>
+    <h1>Test PokerSolver Library</h1>
+    <div id="results"></div>
+    
+    <script src="pokersolver.js"></script>
+    <script>
+        console.log('Testing PokerSolver library...');
+        
+        // Test 1: Simple pair vs high card
+        const test1Cards1 = [
+            {rank: 11, suit: 'h'}, {rank: 10, suit: 'h'}, // JTs
+            {rank: 2, suit: 'c'}, {rank: 3, suit: 'd'}, {rank: 4, suit: 's'}, 
+            {rank: 5, suit: 'h'}, {rank: 7, suit: 'c'}
+        ];
+        
+        const test1Cards2 = [
+            {rank: 14, suit: 's'}, {rank: 13, suit: 'd'}, // AKo
+            {rank: 2, suit: 'c'}, {rank: 3, suit: 'd'}, {rank: 4, suit: 's'}, 
+            {rank: 5, suit: 'h'}, {rank: 7, suit: 'c'}
+        ];
+        
+        console.log('Test 1: JTs vs AKo on 2-3-4-5-7 board');
+        console.log('JTs cards:', test1Cards1);
+        console.log('AKo cards:', test1Cards2);
+        
+        const hand1 = PokerSolver.evaluateHand(test1Cards1);
+        const hand2 = PokerSolver.evaluateHand(test1Cards2);
+        
+        console.log('JTs best hand:', hand1);
+        console.log('AKo best hand:', hand2);
+        
+        const result1 = PokerSolver.compareHands(hand1, hand2);
+        console.log('Comparison result:', result1);
+        console.log('Expected: Negative (AKo should win with A high)');
+        
+        // Test 2: Both make pairs
+        const test2Cards1 = [
+            {rank: 11, suit: 'h'}, {rank: 10, suit: 'h'}, // JTs
+            {rank: 11, suit: 'c'}, {rank: 3, suit: 'd'}, {rank: 4, suit: 's'}, 
+            {rank: 5, suit: 'h'}, {rank: 7, suit: 'c'}
+        ];
+        
+        const test2Cards2 = [
+            {rank: 14, suit: 's'}, {rank: 13, suit: 'd'}, // AKo
+            {rank: 11, suit: 'c'}, {rank: 3, suit: 'd'}, {rank: 4, suit: 's'}, 
+            {rank: 5, suit: 'h'}, {rank: 7, suit: 'c'}
+        ];
+        
+        console.log('\nTest 2: JTs vs AKo on J-3-4-5-7 board');
+        const hand3 = PokerSolver.evaluateHand(test2Cards1);
+        const hand4 = PokerSolver.evaluateHand(test2Cards2);
+        
+        console.log('JTs best hand (pair of Jacks):', hand3);
+        console.log('AKo best hand (pair of Jacks):', hand4);
+        
+        const result2 = PokerSolver.compareHands(hand3, hand4);
+        console.log('Comparison result:', result2);
+        console.log('Expected: Negative (both have JJ but AKo has better kickers)');
+        
+        // Test 3: Direct Hand.solve test
+        console.log('\nTest 3: Direct Hand.solve test');
+        try {
+            const directHand1 = PokerSolver.Hand.solve(['Jh', 'Th', '2c', '3d', '4s']);
+            const directHand2 = PokerSolver.Hand.solve(['As', 'Kd', '2c', '3d', '4s']);
+            
+            console.log('Direct hand 1:', directHand1);
+            console.log('Direct hand 2:', directHand2);
+            
+            const directResult = PokerSolver.compareHands(directHand1, directHand2);
+            console.log('Direct comparison:', directResult);
+        } catch (e) {
+            console.error('Direct test error:', e);
+        }
+        
+        document.getElementById('results').innerHTML = `
+            <h2>Test Results:</h2>
+            <p><strong>Test 1:</strong> ${result1 < 0 ? 'PASS (AKo wins)' : 'FAIL (JTs should not win)'}</p>
+            <p><strong>Test 2:</strong> ${result2 < 0 ? 'PASS (AKo wins with kickers)' : 'FAIL (AKo should win with kickers)'}</p>
+        `;
+    </script>
+</body>
+</html>
