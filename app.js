@@ -4,6 +4,7 @@ class PokerOddsApp {
     constructor() {
         this.initializeElements();
         this.bindEvents();
+        this.loadFromURL();
         this.updateHandPreviews();
     }
 
@@ -34,10 +35,12 @@ class PokerOddsApp {
         
         this.hand1Input.addEventListener('input', () => {
             this.updateHandPreview(this.hand1Input.value, this.hand1Preview);
+            this.updateURL();
         });
         
         this.hand2Input.addEventListener('input', () => {
             this.updateHandPreview(this.hand2Input.value, this.hand2Preview);
+            this.updateURL();
         });
         
         // Enter key support
@@ -57,9 +60,52 @@ class PokerOddsApp {
                 this.hand1Input.value = hand1;
                 this.hand2Input.value = hand2;
                 this.updateHandPreviews();
+                this.updateURL();
                 this.calculateOdds();
             });
         });
+    }
+
+    loadFromURL() {
+        const params = new URLSearchParams(window.location.search);
+        const hand1 = params.get('hand1');
+        const hand2 = params.get('hand2');
+        
+        if (hand1) {
+            this.hand1Input.value = hand1;
+        }
+        
+        if (hand2) {
+            this.hand2Input.value = hand2;
+        }
+        
+        // If both hands are provided in URL, auto-calculate
+        if (hand1 && hand2) {
+            // Use setTimeout to ensure DOM is ready
+            setTimeout(() => {
+                this.calculateOdds();
+            }, 100);
+        }
+    }
+
+    updateURL() {
+        const hand1 = this.hand1Input.value.trim();
+        const hand2 = this.hand2Input.value.trim();
+        
+        const params = new URLSearchParams();
+        if (hand1) {
+            params.set('hand1', hand1);
+        }
+        if (hand2) {
+            params.set('hand2', hand2);
+        }
+        
+        const newURL = params.toString() 
+            ? `${window.location.pathname}?${params.toString()}`
+            : window.location.pathname;
+        
+        // Update URL without reloading the page
+        window.history.replaceState({}, '', newURL);
     }
 
     updateHandPreviews() {
@@ -106,6 +152,7 @@ class PokerOddsApp {
             const results = await this.runCalculation(hand1Value, hand2Value);
             
             this.displayResults(results, hand1, hand2);
+            this.updateURL();
             
         } catch (error) {
             alert(`Error: ${error.message}`);
