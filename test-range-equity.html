@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Range Equity Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 5px;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            background: #333;
+            border-radius: 3px;
+        }
+        .success { color: #4ade80; }
+        .error { color: #f87171; }
+        .info { color: #60a5fa; }
+    </style>
+</head>
+<body>
+    <h1>Range Equity Calculator Tests</h1>
+    <div id="results"></div>
+
+    <script src="pokersolver-real.js"></script>
+    <script src="poker-logic.js"></script>
+    <script>
+        const resultsDiv = document.getElementById('results');
+        
+        function log(message, className = '') {
+            const div = document.createElement('div');
+            div.className = `test-result ${className}`;
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+            console.log(message);
+        }
+
+        function testRangeParsing() {
+            log('=== Testing Range Parsing ===', 'info');
+            
+            const parser = new RangeParser();
+            const testCases = [
+                { range: '55+', expectedMin: 10 },
+                { range: 'A5s+', expectedMin: 9 },
+                { range: 'AT+', expectedMin: 4 },
+                { range: 'KTs+', expectedMin: 3 },
+                { range: 'QTs+', expectedMin: 2 },
+                { range: '22+,A5s+,AT+,KTs+,QTs+', expectedMin: 20 },
+                { range: '22+,A2s+,A2+,KTs+,QTs+', expectedMin: 20 },
+            ];
+
+            testCases.forEach(test => {
+                try {
+                    const hands = parser.parseRange(test.range);
+                    log(`✓ "${test.range}" → ${hands.length} hands (expected at least ${test.expectedMin})`, 
+                        hands.length >= test.expectedMin ? 'success' : 'error');
+                    
+                    // Show first few hands
+                    if (hands.length <= 10) {
+                        log(`  Hands: ${hands.map(h => h.cards).join(', ')}`, 'info');
+                    } else {
+                        log(`  First 5: ${hands.slice(0, 5).map(h => h.cards).join(', ')}...`, 'info');
+                    }
+                } catch (error) {
+                    log(`✗ "${test.range}" → ERROR: ${error.message}`, 'error');
+                }
+            });
+        }
+
+        async function testRangeEquity() {
+            log('\n=== Testing Range Equity Calculations ===', 'info');
+            
+            const testCases = [
+                {
+                    name: 'BB vs UTG+1 (Example from user)',
+                    range1: '55+,A5s+,AT+,KTs+,QTs+',
+                    range2: '22+,A2s+,A2+,KTs+,QTs+',
+                    board: ''
+                },
+                {
+                    name: 'Tight vs Loose Preflop',
+                    range1: '88+,A9s+,KTs+,QTs+,JTs,ATo+,KJo+',
+                    range2: '22+,A2s+,K9s+,Q9s+,J9s+,T9s+,98s+,87s+,76s+,65s+,54s+,A2o+,K9o+,Q9o+,J9o+,T9o+',
+                    board: ''
+                },
+                {
+                    name: 'BB vs UTG+1 with Flop',
+                    range1: '55+,A5s+,AT+,KTs+,QTs+',
+                    range2: '22+,A2s+,A2+,KTs+,QTs+',
+                    board: 'As Ks 2c'
+                }
+            ];
+
+            for (const test of testCases) {
+                log(`\n${test.name}:`, 'info');
+                log(`  Range 1: ${test.range1}`, 'info');
+                log(`  Range 2: ${test.range2}`, 'info');
+                if (test.board) {
+                    log(`  Board: ${test.board}`, 'info');
+                }
+                
+                try {
+                    const startTime = Date.now();
+                    const result = OddsCalculator.calculateRangeEquity(
+                        test.range1, 
+                        test.range2, 
+                        test.board,
+                        20000 // Reduced iterations for faster testing
+                    );
+                    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+                    
+                    log(`  ✓ Range 1 Equity: ${result.range1Equity.toFixed(2)}%`, 'success');
+                    log(`  ✓ Range 2 Equity: ${result.range2Equity.toFixed(2)}%`, 'success');
+                    log(`  ✓ Range 1 Hands: ${result.range1HandCount}`, 'info');
+                    log(`  ✓ Range 2 Hands: ${result.range2HandCount}`, 'info');
+                    log(`  ✓ Hand Pairs Tested: ${result.handPairsTested}`, 'info');
+                    log(`  ✓ Combinations Tested: ${result.combinationsTested}`, 'info');
+                    log(`  ✓ Total Simulations: ${result.iterations.toLocaleString()}`, 'info');
+                    log(`  ✓ Time: ${duration}s`, 'info');
+                    
+                    // Verify equity adds up to ~100%
+                    const total = result.range1Equity + result.range2Equity;
+                    if (Math.abs(total - 100) < 1) {
+                        log(`  ✓ Equity totals: ${total.toFixed(2)}% (expected ~100%)`, 'success');
+                    } else {
+                        log(`  ⚠ Equity totals: ${total.toFixed(2)}% (expected ~100%)`, 'error');
+                    }
+                } catch (error) {
+                    log(`  ✗ ERROR: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        async function runAllTests() {
+            log('Starting Range Equity Calculator Tests...\n', 'info');
+            
+            testRangeParsing();
+            
+            // Wait a bit for parsing tests to complete
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            await testRangeEquity();
+            
+            log('\n=== All Tests Complete ===', 'info');
+        }
+
+        // Run tests when page loads
+        window.addEventListener('load', () => {
+            setTimeout(runAllTests, 500); // Give scripts time to load
+        });
+    </script>
+</body>
+</html>
+

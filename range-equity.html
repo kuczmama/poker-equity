@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Range Equity Calculator</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#38e07b",
+              "background-light": "#f6f8f7",
+              "background-dark": "#122017",
+            },
+            fontFamily: {
+              display: ["Space Grotesk"],
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+        .range-preview.valid {
+            color: #38e07b;
+        }
+        .range-preview.invalid {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+    <div class="flex flex-col min-h-screen">
+        <nav class="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-gray-200 dark:border-gray-700">
+            <div class="max-w-md mx-auto flex justify-center space-x-4">
+                <a href="index.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Single Hand Calculator</a>
+                <span class="text-gray-400">|</span>
+                <a href="range-equity.html" class="text-sm font-bold text-primary">Range Calculator</a>
+            </div>
+        </nav>
+        
+        <main class="flex-grow flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+            <div class="w-full max-w-2xl space-y-8">
+                <div>
+                    <h1 class="text-center text-3xl font-bold text-gray-900 dark:text-white">Range Equity Calculator</h1>
+                    <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">Compare two poker hand ranges against each other.</p>
+                </div>
+                
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="range1">Range 1</label>
+                            <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="range1" name="range1" placeholder="e.g., 55+,A5s+,AT+,KTs+,QTs+" type="text" value="55+,A5s+,AT+,KTs+,QTs+"/>
+                            <div class="range-preview mt-1 text-xs" id="range1-preview"></div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="position1">Position</label>
+                            <select class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="position1" name="position1">
+                                <option value="UTG">UTG</option>
+                                <option value="UTG+1">UTG+1</option>
+                                <option value="MP">MP</option>
+                                <option value="LJ">LJ</option>
+                                <option value="HJ">HJ</option>
+                                <option value="CO">CO</option>
+                                <option value="BTN">BTN</option>
+                                <option value="SB">SB</option>
+                                <option value="BB" selected>BB</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="range2">Range 2</label>
+                            <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="range2" name="range2" placeholder="e.g., 22+,A2s+,A2+,KTs+,QTs+" type="text" value="22+,A2s+,A2+,KTs+,QTs+"/>
+                            <div class="range-preview mt-1 text-xs" id="range2-preview"></div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="position2">Position</label>
+                            <select class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="position2" name="position2">
+                                <option value="UTG">UTG</option>
+                                <option value="UTG+1" selected>UTG+1</option>
+                                <option value="MP">MP</option>
+                                <option value="LJ">LJ</option>
+                                <option value="HJ">HJ</option>
+                                <option value="CO">CO</option>
+                                <option value="BTN">BTN</option>
+                                <option value="SB">SB</option>
+                                <option value="BB">BB</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="board">Board Cards (Optional)</label>
+                        <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="board" name="board" placeholder="e.g., As Ks 2c or AsKs2c" type="text" value=""/>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Enter flop, turn, or river cards (e.g., As Ks 2c or AsKs2c)</p>
+                    </div>
+                    
+                    <div class="text-center text-sm text-gray-500 dark:text-gray-400">
+                        <p>Examples: <button class="example-btn underline hover:text-primary" data-range1="55+,A5s+,AT+,KTs+,QTs+" data-range2="22+,A2s+,A2+,KTs+,QTs+" data-pos1="BB" data-pos2="UTG+1">BB vs UTG+1</button></p>
+                    </div>
+                    
+                    <button id="calculate-btn" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-lg text-background-dark bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors" type="button">
+                        Calculate Range Equity
+                    </button>
+                </div>
+                
+                <div class="results mt-8 p-6 bg-gray-50 dark:bg-gray-800/20 rounded-lg" id="results" style="display: none;">
+                    <h3 class="text-lg font-bold text-center text-gray-900 dark:text-white">Results</h3>
+                    
+                    <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4 text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                        <div class="flex justify-between">
+                            <span class="font-medium">Range 1 Hands:</span>
+                            <span class="text-gray-900 dark:text-white" id="range1-hand-count"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="font-medium">Range 2 Hands:</span>
+                            <span class="text-gray-900 dark:text-white" id="range2-hand-count"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="font-medium">Simulation:</span>
+                            <span class="text-gray-900 dark:text-white" id="simulation-info"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6 flex justify-around text-center">
+                        <div>
+                            <p class="text-base font-bold text-gray-900 dark:text-white" id="range1-info"></p>
+                            <p class="text-3xl font-bold text-primary" id="range1-equity"></p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500">Win/Split</p>
+                        </div>
+                        <div>
+                            <p class="text-base font-bold text-gray-900 dark:text-white" id="range2-info"></p>
+                            <p class="text-3xl font-bold text-gray-700 dark:text-gray-300" id="range2-equity"></p>
+                            <p class="text-xs text-gray-500 dark:text-gray-500">Win/Split</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 h-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div class="h-full bg-primary transition-all duration-1000" id="range1-progress"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="pokersolver-real.js"></script>
+    <script src="poker-logic.js"></script>
+    <script src="range-equity-app.js"></script>
+</body>
+</html>
+
