@@ -1,5 +1,18 @@
 // Range Equity Calculator Application Logic
 
+// Predefined position ranges
+const POSITION_RANGES = {
+    'UTG': 'A4s+,K9s+,QTs+,77+,AJo+,JTs',
+    'UTG+1': 'A3s+,K9s+,QTs+,77+,AJo+,JTs',
+    'UTG+2': 'A3s+,K5s+,Q9s+,77+,ATo+,JTs,T9s,KJo+',
+    'LJ': 'A2s+,K5s+,Q9s+,J9s+,66+,T9s,ATo+',
+    'HJ': 'A2s+,K5s+,Q8s+,J9s+,55+,T9s,A9o+,T8s',
+    'CO': 'A5o,A8o+,KTo+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,44+,87s,97s,98s',
+    'BTN': 'A3o+,A8o+,K8o+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,22+,87s,97s,98s,54s,65s,75s,96s+,T8o',
+    'SB': 'A3o+,A8o+,K8o+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,22+,87s,97s,98s,54s,65s,75s,96s+',
+    'BB': '22+,A2+,K2+,Q2+,J2+,T2+,92+,82+,72+,62+,52+,42+,32+,A2s+,K2s+,Q2s+,J2s+,T2s+,92s+,82s+,72s+,62s+,52s+,42s+,32s+'
+};
+
 class RangeEquityApp {
     constructor() {
         this.initializeElements();
@@ -46,8 +59,14 @@ class RangeEquityApp {
             this.updateURL();
         });
         
-        this.position1Select.addEventListener('change', () => this.updateURL());
-        this.position2Select.addEventListener('change', () => this.updateURL());
+        this.position1Select.addEventListener('change', () => {
+            this.applyPositionRange(1);
+            this.updateURL();
+        });
+        this.position2Select.addEventListener('change', () => {
+            this.applyPositionRange(2);
+            this.updateURL();
+        });
         this.boardInput.addEventListener('input', () => this.updateURL());
         
         // Enter key support
@@ -73,8 +92,20 @@ class RangeEquityApp {
                 
                 if (range1) this.range1Input.value = range1;
                 if (range2) this.range2Input.value = range2;
-                if (pos1) this.position1Select.value = pos1;
-                if (pos2) this.position2Select.value = pos2;
+                if (pos1) {
+                    this.position1Select.value = pos1;
+                    // Apply position range if not explicitly set
+                    if (!range1) {
+                        this.applyPositionRange(1);
+                    }
+                }
+                if (pos2) {
+                    this.position2Select.value = pos2;
+                    // Apply position range if not explicitly set
+                    if (!range2) {
+                        this.applyPositionRange(2);
+                    }
+                }
                 
                 this.updateRangePreviews();
                 this.updateURL();
@@ -91,20 +122,32 @@ class RangeEquityApp {
         const pos2 = params.get('pos2');
         const board = params.get('board');
         
-        if (range1) {
-            this.range1Input.value = range1;
-        }
-        
-        if (range2) {
-            this.range2Input.value = range2;
-        }
-        
         if (pos1) {
             this.position1Select.value = pos1;
         }
         
         if (pos2) {
             this.position2Select.value = pos2;
+        }
+        
+        if (range1) {
+            this.range1Input.value = range1;
+        } else if (pos1) {
+            // Apply position range if position is set but range is not
+            this.applyPositionRange(1);
+        } else {
+            // Apply default position range for position1
+            this.applyPositionRange(1);
+        }
+        
+        if (range2) {
+            this.range2Input.value = range2;
+        } else if (pos2) {
+            // Apply position range if position is set but range is not
+            this.applyPositionRange(2);
+        } else {
+            // Apply default position range for position2
+            this.applyPositionRange(2);
         }
         
         if (board) {
@@ -148,6 +191,20 @@ class RangeEquityApp {
             : window.location.pathname;
         
         window.history.replaceState({}, '', newURL);
+    }
+
+    applyPositionRange(rangeNumber) {
+        const positionSelect = rangeNumber === 1 ? this.position1Select : this.position2Select;
+        const rangeInput = rangeNumber === 1 ? this.range1Input : this.range2Input;
+        const preview = rangeNumber === 1 ? this.range1Preview : this.range2Preview;
+        
+        const position = positionSelect.value;
+        const defaultRange = POSITION_RANGES[position];
+        
+        if (defaultRange) {
+            rangeInput.value = defaultRange;
+            this.updateRangePreview(defaultRange, preview);
+        }
     }
 
     updateRangePreviews() {

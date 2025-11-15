@@ -1,5 +1,18 @@
 // Visual Range Comparison Application Logic
 
+// Predefined position ranges
+const POSITION_RANGES = {
+    'UTG': 'A4s+,K9s+,QTs+,77+,AJo+,JTs',
+    'UTG+1': 'A3s+,K9s+,QTs+,77+,AJo+,JTs',
+    'UTG+2': 'A3s+,K5s+,Q9s+,77+,ATo+,JTs,T9s,KJo+',
+    'LJ': 'A2s+,K5s+,Q9s+,J9s+,66+,T9s,ATo+',
+    'HJ': 'A2s+,K5s+,Q8s+,J9s+,55+,T9s,A9o+,T8s',
+    'CO': 'A5o,A8o+,KTo+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,44+,87s,97s,98s',
+    'BTN': 'A3o+,A8o+,K8o+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,22+,87s,97s,98s,54s,65s,75s,96s+,T8o',
+    'SB': 'A3o+,A8o+,K8o+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,22+,87s,97s,98s,54s,65s,75s,96s+',
+    'BB': '22+,A2+,K2+,Q2+,J2+,T2+,92+,82+,72+,62+,52+,42+,32+,A2s+,K2s+,Q2s+,J2s+,T2s+,92s+,82s+,72s+,62s+,52s+,42s+,32s+'
+};
+
 class VisualRangeApp {
     constructor() {
         this.range1 = new Set(); // Set of hand keys in range 1
@@ -36,6 +49,8 @@ class VisualRangeApp {
         this.simulationInfo = document.getElementById('simulation-info');
         this.range1HandCount = document.getElementById('range1-hand-count');
         this.range2HandCount = document.getElementById('range2-hand-count');
+        this.position1Select = document.getElementById('position1');
+        this.position2Select = document.getElementById('position2');
         
         this.parser = new RangeParser();
     }
@@ -89,6 +104,19 @@ class VisualRangeApp {
         // Calculate button
         if (this.calculateBtn) {
             this.calculateBtn.addEventListener('click', () => this.calculateEquity());
+        }
+        
+        // Position dropdowns
+        if (this.position1Select) {
+            this.position1Select.addEventListener('change', () => {
+                this.applyPositionRange(1);
+            });
+        }
+        
+        if (this.position2Select) {
+            this.position2Select.addEventListener('change', () => {
+                this.applyPositionRange(2);
+            });
         }
 
     }
@@ -158,10 +186,11 @@ class VisualRangeApp {
         return grid;
     }
 
-    getHandKey(handStr) {
+    getHandKey(handStrOrObj) {
         // Create a unique key for a hand
         // Normalize to ensure consistent key format
-        const hand = new PokerHand(handStr);
+        // Accepts either a string (e.g., "AA", "AKs") or a PokerHand object
+        const hand = typeof handStrOrObj === 'string' ? new PokerHand(handStrOrObj) : handStrOrObj;
         if (hand.paired) {
             return `pair-${hand.highCard}`;
         } else {
@@ -401,6 +430,36 @@ class VisualRangeApp {
         }
         if (this.range2Count) {
             this.range2Count.textContent = this.range2.size;
+        }
+    }
+    
+    applyPositionRange(rangeNumber) {
+        const positionSelect = rangeNumber === 1 ? this.position1Select : this.position2Select;
+        const position = positionSelect ? positionSelect.value : '';
+        
+        if (!position || !POSITION_RANGES[position]) {
+            return;
+        }
+        
+        const rangeString = POSITION_RANGES[position];
+        const targetRange = rangeNumber === 1 ? this.range1 : this.range2;
+        
+        // Clear the target range first
+        targetRange.clear();
+        
+        // Parse the range string and add hands to the target range
+        try {
+            const hands = this.parser.parseRange(rangeString);
+            for (const hand of hands) {
+                const key = this.getHandKey(hand);
+                targetRange.add(key);
+            }
+            
+            // Update the grid display
+            this.renderGrid();
+            this.updateCounts();
+        } catch (error) {
+            console.error('Error applying position range:', error);
         }
     }
 
