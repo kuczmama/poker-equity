@@ -9,6 +9,8 @@ class BetSizingApp {
     initializeElements() {
         // Inputs
         this.potSizeInput = document.getElementById('potSize');
+        this.numPlayersInput = document.getElementById('numPlayers');
+        this.effectiveStackInput = document.getElementById('effectiveStack');
         this.boardInput = document.getElementById('boardInput');
         this.heroHandInput = document.getElementById('heroHand');
         this.villainRangeInput = document.getElementById('villainRange');
@@ -152,6 +154,13 @@ class BetSizingApp {
 
     async calculateEV() {
         const potSize = parseFloat(this.potSizeInput.value);
+        const numPlayers = parseInt(this.numPlayersInput.value) || 2;
+        const effectiveStack = parseFloat(this.effectiveStackInput.value) || 0;
+        
+        // Calculate SPR (Stack to Pot Ratio)
+        const spr = potSize > 0 ? effectiveStack / potSize : 0;
+        const numOpponents = Math.max(1, numPlayers - 1);
+
         let boardInputVal = this.boardInput.value.trim();
         const heroHandInputVal = this.heroHandInput.value.trim();
         const villainRangeStr = this.villainRangeInput.value.trim();
@@ -175,7 +184,24 @@ class BetSizingApp {
             // If it's already specific (AsQc), use it. If generic, pick a representative.
             const heroHand = this.parseHeroHand(heroHandInputVal, board);
 
-            const sizes = [0, 0.33, 0.50, 0.75, 1.0, 1.5]; // 0 is Check
+            // Standard bet sizes as % of pot
+            const standardSizes = [0, 0.33, 0.50, 0.75, 1.0, 1.5];
+            
+            // Calculate max bet size allowed by stack (All-In)
+            const maxBetPct = potSize > 0 ? effectiveStack / potSize : 0;
+            
+            // Filter sizes that are valid given the stack
+            let sizes = standardSizes.filter(s => s <= maxBetPct);
+            
+            // Always include All-In option if not 0 and not already covered closely
+            // (Using epsilon check or just push)
+            if (maxBetPct > 0) {
+                 sizes.push(maxBetPct);
+            }
+            
+            // Deduplicate (using simple Set) and sort
+            sizes = [...new Set(sizes)].sort((a, b) => a - b);
+
             const results = [];
 
             // We need to parse range first to get total combo count for accurate fold %
@@ -185,7 +211,7 @@ class BetSizingApp {
                 const betAmount = potSize * sizePct;
                 
                 // 1. Calculate Fold Percentage based on Villain Type & Size
-                const foldStats = this.calculateFoldStats(sizePct, villainType);
+                const foldStats = this.calculateFoldStats(sizePct, villainType, numOpponents, spr);
                 const foldPct = foldStats.foldPct;
                 const defenseFreq = 1 - foldPct;
 
@@ -289,7 +315,7 @@ class BetSizingApp {
          return str.match(/[AKQJT98765432][shdc]/g) || [];
     }
 
-    calculateFoldStats(sizePct, type) {
+    calculateFoldStats(sizePct, type, numOpponents = 1, spr = 10) {
         if (sizePct === 0) return { foldPct: 0 };
 
         let defenseFreq;
@@ -307,7 +333,23 @@ class BetSizingApp {
                 defenseFreq = mdf * 0.9; 
         }
 
-        return { foldPct: 1 - defenseFreq };
+        // Base single opponent fold %
+        let singleFoldPct = 1 - defenseFreq;
+        
+        // SPR Adjustment
+        // Low SPR (< 3) -> Lower fold % (Stickier)
+        // High SPR (> 5) -> Normal fold %
+        // Formula: 1 - exp(-0.8 * spr)
+        // SPR=1 -> ~0.55 factor
+        // SPR=3 -> ~0.91 factor
+        const sprFactor = 1 - Math.exp(-0.8 * spr);
+        singleFoldPct = singleFoldPct * sprFactor;
+        
+        // Multi-player Adjustment
+        // Probability that ALL opponents fold = (Prob one folds)^NumOpponents
+        const totalFoldPct = Math.pow(singleFoldPct, numOpponents);
+
+        return { foldPct: totalFoldPct };
     }
 
     async runEquitySim(hand, range, board) {
@@ -324,7 +366,7 @@ class BetSizingApp {
 
         results.forEach(res => {
             const isBest = res.ev === bestEV;
-            const sizeLabel = res.sizePct === 0 ? 'Check' : `${res.sizePct * 100}% ($${res.betAmount})`;
+            const sizeLabel = res.sizePct === 0 ? 'Check' : `${(res.sizePct * 100).toFixed(0)}% ($${res.betAmount.toFixed(0)})`;
             
             const row = document.createElement('div');
             // Tailwind classes for the result row
