@@ -11,8 +11,35 @@ class PokerHand {
     }
 
     parseHand() {
-        const input = this.cards.trim().toUpperCase();
+        const input = this.cards.trim().replace(/\s/g, '').toUpperCase();
         
+        // Check for specific card format (e.g. "AsKh", "Td2c")
+        // Regex: Rank+Suit+Rank+Suit
+        const specificCardRegex = /^([AKQJT98765432][SHDC])([AKQJT98765432][SHDC])$/;
+        const match = input.match(specificCardRegex);
+
+        if (match) {
+            // Specific cards
+            const c1 = match[1];
+            const c2 = match[2];
+            
+            const r1 = this.parseCard(c1[0]);
+            const s1 = c1[1].toLowerCase();
+            const r2 = this.parseCard(c2[0]);
+            const s2 = c2[1].toLowerCase();
+
+            this.specificCards = [
+                { rank: r1, suit: s1 },
+                { rank: r2, suit: s2 }
+            ];
+
+            this.highCard = Math.max(r1, r2);
+            this.lowCard = Math.min(r1, r2);
+            this.paired = r1 === r2;
+            this.suited = s1 === s2;
+            return;
+        }
+
         if (input.length === 2) {
             // Pocket pair (e.g., "22", "AA")
             this.paired = true;
@@ -47,7 +74,7 @@ class PokerHand {
                 throw new Error(`Invalid hand: ${input}. Pocket pairs cannot be suited (use ${input[0]}${input[1]} instead)`);
             }
         } else {
-            throw new Error(`Invalid hand format: ${input}. Use format like: 22, AKo, AKs, AQs`);
+            throw new Error(`Invalid hand format: ${input}. Use format like: 22, AKo, AKs, AQs, or specific cards AsKh`);
         }
     }
 
@@ -85,6 +112,10 @@ class PokerHand {
 
     // Generate all possible card combinations for this hand
     getAllPossibleCards() {
+        if (this.specificCards) {
+            return [this.specificCards];
+        }
+
         const suits = ['h', 'd', 'c', 's']; // hearts, diamonds, clubs, spades
         const combinations = [];
 
