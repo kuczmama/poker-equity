@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Optimal Bet Sizing Simulator</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#38e07b",
+              "background-light": "#f6f8f7",
+              "background-dark": "#122017",
+            },
+            fontFamily: {
+              display: ["Space Grotesk"],
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+        .bet-row {
+            transition: background-color 0.2s;
+        }
+        
+        .card-btn {
+            font-family: monospace;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .card-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .suit-h { color: #dc3545; }
+        .suit-d { color: #3b82f6; }
+        .suit-c { color: #22c55e; }
+        .suit-s { color: #374151; }
+        
+        /* Dark mode suit colors */
+        .dark .suit-s { color: #9ca3af; }
+
+        .suit-row-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            width: 2rem;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+    <div class="flex flex-col min-h-screen">
+        <nav class="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-gray-200 dark:border-gray-700">
+            <div class="max-w-md mx-auto flex justify-center space-x-4">
+                <a href="index.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Single Hand Calculator</a>
+                <span class="text-gray-400">|</span>
+                <a href="range-equity.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Range Calculator</a>
+                <span class="text-gray-400">|</span>
+                <a href="range-visual.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Visual Range</a>
+                <span class="text-gray-400">|</span>
+                <a href="bet-sizing.html" class="text-sm font-bold text-primary">Bet Sizing</a>
+            </div>
+        </nav>
+        
+        <main class="flex-grow flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+            <div class="w-full max-w-4xl space-y-8">
+                <div>
+                    <h1 class="text-center text-3xl font-bold text-gray-900 dark:text-white">Optimal Bet Sizing Simulator</h1>
+                    <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">Calculate Expected Value (EV) to determine the best bet size.</p>
+                </div>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Input Panel -->
+                    <div class="space-y-6">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="potSize">Pot Size ($)</label>
+                            <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="potSize" type="number" value="100" min="0"/>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="boardInput">Board Cards</label>
+                            <div class="flex gap-2">
+                                <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="boardInput" placeholder="e.g., Ah Ks Jd or A-K-J" type="text"/>
+                                <button id="selectBoardBtn" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                    Select
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">Use "Ah Ks Jd" for specific cards or "A-K-J" for rainbow unsuited</p>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="heroHand">Your Hand</label>
+                            <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="heroHand" placeholder="e.g., AQo or AsQc" type="text" value="AQo"/>
+                             <p class="text-xs text-gray-500 dark:text-gray-400">Accepts specific (AsQc) or generic (AQo, AQs, AA) notation</p>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="villainRange">Opponent's Range</label>
+                            <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="villainRange" placeholder="e.g., TT+, AQs+, AKo" type="text" value="TT+, AQs+, AKo"/>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">Comma separated ranges</p>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="villainType">Opponent Type</label>
+                            <select class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="villainType">
+                                <option value="elastic">Elastic (Standard)</option>
+                                <option value="inelastic">Inelastic (Calling Station)</option>
+                                <option value="fit-or-fold">Fit or Fold (Nit)</option>
+                            </select>
+                        </div>
+                        
+                        <button id="calculateBtn" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-lg text-background-dark bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors" type="button">
+                            Calculate EV
+                        </button>
+                    </div>
+                    
+                    <!-- Results Panel -->
+                    <div class="results p-6 bg-gray-50 dark:bg-gray-800/20 rounded-lg" id="resultsPanel" style="display: none;">
+                        <h3 class="text-lg font-bold text-center text-gray-900 dark:text-white mb-6">Analysis Results</h3>
+                        <div id="resultsContainer" class="space-y-4">
+                            <!-- Results will be injected here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Card Selector Modal -->
+    <div id="cardSelectorModal" class="fixed inset-0 bg-black/50 z-50 hidden flex justify-center items-center p-4">
+        <div class="bg-white dark:bg-gray-900 rounded-lg p-6 w-full max-w-4xl shadow-xl overflow-y-auto max-h-screen">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Select Board Cards (Max 5)</h3>
+            
+            <div id="cardGridContainer" class="mb-6 overflow-x-auto">
+                <!-- Grid will be injected here -->
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button id="clearCardsBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                    Clear
+                </button>
+                <button id="closeModalBtn" class="px-4 py-2 text-sm font-bold text-background-dark bg-primary hover:bg-primary/90 rounded-lg transition-colors">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="pokersolver-real.js"></script>
+    <script src="poker-logic.js"></script>
+    <script src="bet-sizing-app.js"></script>
+</body>
+</html>
