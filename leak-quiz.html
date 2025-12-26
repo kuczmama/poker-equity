@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Poker Leak Quiz - Decision Training</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#38e07b",
+              accent: "#f59e0b",
+              danger: "#ef4444",
+              "background-light": "#f6f8f7",
+              "background-dark": "#0a1612",
+              "card-dark": "#111d17",
+              "surface-dark": "#162620",
+            },
+            fontFamily: {
+              display: ["Outfit", "sans-serif"],
+              mono: ["JetBrains Mono", "monospace"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+        body {
+            background: radial-gradient(ellipse at top, #162620 0%, #0a1612 50%, #050a08 100%);
+        }
+        
+        .card-glow {
+            box-shadow: 0 0 40px rgba(56, 224, 123, 0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        
+        .suit-h { color: #ef4444; }
+        .suit-d { color: #3b82f6; }
+        .suit-c { color: #22c55e; }
+        .suit-s { color: #e5e7eb; }
+        
+        .action-btn {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .action-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+        
+        .action-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        
+        .card-display {
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.05em;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes pulse-correct {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(56, 224, 123, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(56, 224, 123, 0); }
+        }
+        
+        @keyframes pulse-wrong {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+        }
+        
+        .animate-in {
+            animation: slideIn 0.4s ease-out;
+        }
+        
+        .correct-flash {
+            animation: pulse-correct 0.6s ease-out;
+        }
+        
+        .wrong-flash {
+            animation: pulse-wrong 0.6s ease-out;
+        }
+        
+        .progress-segment {
+            transition: all 0.3s ease;
+        }
+        
+        .streak-fire {
+            text-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
+        }
+    </style>
+</head>
+<body class="font-display text-gray-200 min-h-screen">
+    <div class="flex flex-col min-h-screen">
+        <!-- Navigation -->
+        <nav class="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-gray-800/50 backdrop-blur-sm bg-background-dark/50">
+            <div class="max-w-4xl mx-auto flex justify-center flex-wrap gap-x-4 gap-y-2">
+                <a href="index.html" class="text-sm text-gray-500 hover:text-primary transition-colors">Calculator</a>
+                <span class="text-gray-700">|</span>
+                <a href="range-equity.html" class="text-sm text-gray-500 hover:text-primary transition-colors">Range Equity</a>
+                <span class="text-gray-700">|</span>
+                <a href="bet-sizing.html" class="text-sm text-gray-500 hover:text-primary transition-colors">Bet Sizing</a>
+                <span class="text-gray-700">|</span>
+                <a href="leak-quiz.html" class="text-sm font-bold text-primary">Leak Quiz</a>
+            </div>
+        </nav>
+        
+        <main class="flex-grow flex items-start justify-center py-8 px-4 sm:px-6">
+            <div class="w-full max-w-2xl space-y-6">
+                
+                <!-- Header -->
+                <div class="text-center space-y-2">
+                    <h1 class="text-3xl sm:text-4xl font-bold text-white tracking-tight">
+                        Leak <span class="text-primary">Quiz</span>
+                    </h1>
+                    <p class="text-gray-400 text-sm">Master your preflop decisions with GTO-based drills</p>
+                </div>
+                
+                <!-- Quiz Mode Selector -->
+                <div id="modeSelector" class="card-glow bg-card-dark rounded-xl p-6 border border-gray-800/50">
+                    <h2 class="text-lg font-semibold text-white mb-4">Select Quiz Mode</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button onclick="app.startQuiz('4bet')" class="action-btn p-4 rounded-lg bg-surface-dark border border-gray-700 hover:border-primary/50 hover:bg-primary/5 text-left transition-all group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-danger/20 flex items-center justify-center text-danger font-bold">4B</div>
+                                <div>
+                                    <div class="font-semibold text-white group-hover:text-primary transition-colors">Facing 4-Bets</div>
+                                    <div class="text-xs text-gray-500">Call or fold when 4-bet?</div>
+                                </div>
+                            </div>
+                        </button>
+                        
+                        <button onclick="app.startQuiz('3bet')" class="action-btn p-4 rounded-lg bg-surface-dark border border-gray-700 hover:border-primary/50 hover:bg-primary/5 text-left transition-all group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center text-accent font-bold">3B</div>
+                                <div>
+                                    <div class="font-semibold text-white group-hover:text-primary transition-colors">Facing 3-Bets</div>
+                                    <div class="text-xs text-gray-500">Call, fold, or 4-bet?</div>
+                                </div>
+                            </div>
+                        </button>
+                        
+                        <button onclick="app.startQuiz('river')" class="action-btn p-4 rounded-lg bg-surface-dark border border-gray-700 hover:border-primary/50 hover:bg-primary/5 text-left transition-all group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold">🌊</div>
+                                <div>
+                                    <div class="font-semibold text-white group-hover:text-primary transition-colors">River Decisions</div>
+                                    <div class="text-xs text-gray-500">Call or fold scary rivers?</div>
+                                </div>
+                            </div>
+                        </button>
+                        
+                        <button onclick="app.startQuiz('mixed')" class="action-btn p-4 rounded-lg bg-surface-dark border border-gray-700 hover:border-primary/50 hover:bg-primary/5 text-left transition-all group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary font-bold">∞</div>
+                                <div>
+                                    <div class="font-semibold text-white group-hover:text-primary transition-colors">Mixed Drill</div>
+                                    <div class="text-xs text-gray-500">Random scenarios</div>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Quiz Container (hidden initially) -->
+                <div id="quizContainer" class="hidden space-y-4">
+                    
+                    <!-- Progress & Stats Bar -->
+                    <div class="card-glow bg-card-dark rounded-xl p-4 border border-gray-800/50">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-4">
+                                <div class="text-sm">
+                                    <span class="text-gray-500">Question</span>
+                                    <span id="currentQ" class="font-mono text-white ml-1">1</span>
+                                    <span class="text-gray-600">/</span>
+                                    <span id="totalQ" class="font-mono text-gray-400">10</span>
+                                </div>
+                                <div id="streakDisplay" class="hidden text-sm">
+                                    <span class="streak-fire text-accent">🔥</span>
+                                    <span id="streakCount" class="font-mono text-accent">0</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="text-sm flex items-center gap-1">
+                                    <span class="text-primary font-mono" id="correctCount" title="Correct">0</span>
+                                    <span class="text-gray-600">/</span>
+                                    <span class="text-accent font-mono" id="acceptableCount" title="Acceptable (mixing)">0</span>
+                                    <span class="text-gray-600">/</span>
+                                    <span class="text-danger font-mono" id="wrongCount" title="Wrong">0</span>
+                                </div>
+                                <button onclick="app.endQuiz()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Exit</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Progress Bar -->
+                        <div class="flex gap-1 h-2">
+                            <div id="progressBar" class="flex gap-1 flex-1">
+                                <!-- Progress segments injected here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Legend -->
+                        <div class="flex justify-center gap-4 mt-2 text-xs text-gray-500">
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-primary"></span> Optimal</span>
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-accent"></span> Acceptable</span>
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-danger"></span> Wrong</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Scenario Card -->
+                    <div id="scenarioCard" class="card-glow bg-card-dark rounded-xl p-6 border border-gray-800/50 animate-in">
+                        
+                        <!-- Scenario Type Badge -->
+                        <div class="flex items-center justify-between mb-4">
+                            <span id="scenarioType" class="px-3 py-1 rounded-full text-xs font-semibold bg-danger/20 text-danger">FACING 4-BET</span>
+                            <span id="positionBadge" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-700 text-gray-300">BTN vs UTG</span>
+                        </div>
+                        
+                        <!-- Your Hand -->
+                        <div class="text-center mb-6">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">Your Hand</div>
+                            <div id="heroHand" class="card-display text-4xl sm:text-5xl font-bold tracking-wider">
+                                <!-- Cards injected here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Scenario Description -->
+                        <div id="scenarioDesc" class="text-center text-gray-300 text-sm leading-relaxed mb-6 px-4">
+                            <!-- Description injected here -->
+                        </div>
+                        
+                        <!-- Board (for postflop scenarios) -->
+                        <div id="boardSection" class="hidden mb-6">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider mb-2 text-center">Board</div>
+                            <div id="boardCards" class="card-display text-2xl font-bold tracking-wider text-center">
+                                <!-- Board cards injected here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Pot/Stack Info -->
+                        <div id="potInfo" class="flex justify-center gap-6 mb-6 text-sm">
+                            <div class="text-center">
+                                <div class="text-gray-500 text-xs">Pot</div>
+                                <div id="potSize" class="font-mono text-white">12bb</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-gray-500 text-xs">To Call</div>
+                                <div id="toCall" class="font-mono text-accent">8bb</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-gray-500 text-xs">Stack</div>
+                                <div id="stackSize" class="font-mono text-gray-300">100bb</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div id="actionButtons" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <button onclick="app.submitAnswer('fold')" class="action-btn py-4 px-6 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-semibold transition-all border border-gray-600 hover:border-gray-500">
+                                Fold
+                            </button>
+                            <button onclick="app.submitAnswer('call')" class="action-btn py-4 px-6 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary font-semibold transition-all border border-primary/30 hover:border-primary/50">
+                                Call
+                            </button>
+                            <button id="raiseBtn" onclick="app.submitAnswer('raise')" class="action-btn py-4 px-6 rounded-lg bg-accent/20 hover:bg-accent/30 text-accent font-semibold transition-all border border-accent/30 hover:border-accent/50 col-span-2 sm:col-span-1">
+                                Raise / 4-Bet
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Feedback Card (hidden initially) -->
+                    <div id="feedbackCard" class="hidden card-glow bg-card-dark rounded-xl p-6 border border-gray-800/50 animate-in">
+                        <div id="feedbackHeader" class="flex items-center gap-3 mb-4">
+                            <div id="feedbackIcon" class="w-12 h-12 rounded-full flex items-center justify-center text-2xl">✓</div>
+                            <div>
+                                <div id="feedbackTitle" class="font-bold text-xl">Correct!</div>
+                                <div id="feedbackSubtitle" class="text-sm text-gray-400">GTO approved</div>
+                            </div>
+                        </div>
+                        
+                        <div id="feedbackExplanation" class="text-gray-300 text-sm leading-relaxed mb-4 p-4 rounded-lg bg-surface-dark">
+                            <!-- Explanation injected here -->
+                        </div>
+                        
+                        <div id="gtoRange" class="mb-4 p-4 rounded-lg bg-surface-dark">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">GTO Range for this spot</div>
+                            <div id="gtoRangeText" class="font-mono text-sm text-primary"></div>
+                        </div>
+                        
+                        <button onclick="app.nextQuestion()" class="w-full action-btn py-3 px-6 rounded-lg bg-primary hover:bg-primary/90 text-background-dark font-bold transition-all">
+                            Next Question →
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Results Screen (hidden initially) -->
+                <div id="resultsScreen" class="hidden card-glow bg-card-dark rounded-xl p-8 border border-gray-800/50 animate-in">
+                    <div class="text-center mb-8">
+                        <div id="resultsEmoji" class="text-6xl mb-4">🎯</div>
+                        <h2 id="resultsTitle" class="text-2xl font-bold text-white mb-2">Quiz Complete!</h2>
+                        <p id="resultsSubtitle" class="text-gray-400">Here's how you did</p>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-4 mb-8">
+                        <div class="text-center p-4 rounded-lg bg-surface-dark">
+                            <div id="finalScore" class="text-3xl font-bold text-primary">0%</div>
+                            <div class="text-xs text-gray-500">Accuracy</div>
+                        </div>
+                        <div class="text-center p-4 rounded-lg bg-surface-dark">
+                            <div id="finalCorrect" class="text-3xl font-bold text-primary">0</div>
+                            <div class="text-xs text-gray-500">Correct</div>
+                        </div>
+                        <div class="text-center p-4 rounded-lg bg-surface-dark">
+                            <div id="finalStreak" class="text-3xl font-bold text-accent">0</div>
+                            <div class="text-xs text-gray-500">Best Streak</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Leak Analysis -->
+                    <div id="leakAnalysis" class="mb-8 p-4 rounded-lg bg-surface-dark">
+                        <div class="text-sm font-semibold text-white mb-3">Areas to Improve</div>
+                        <div id="leakList" class="space-y-2 text-sm">
+                            <!-- Leak items injected here -->
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button onclick="app.restartQuiz()" class="flex-1 action-btn py-3 px-6 rounded-lg bg-primary hover:bg-primary/90 text-background-dark font-bold transition-all">
+                            Try Again
+                        </button>
+                        <button onclick="app.endQuiz()" class="flex-1 action-btn py-3 px-6 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-semibold transition-all border border-gray-600">
+                            Back to Menu
+                        </button>
+                    </div>
+                </div>
+                
+            </div>
+        </main>
+        
+        <!-- Footer -->
+        <footer class="py-4 px-4 text-center text-xs text-gray-600 border-t border-gray-800/30">
+            GTO ranges based on standard 100bb 6-max cash game theory
+        </footer>
+    </div>
+
+    <script src="leak-quiz-app.js"></script>
+</body>
+</html>
+

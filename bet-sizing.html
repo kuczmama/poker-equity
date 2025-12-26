@@ -76,6 +76,8 @@
                 <a href="bet-sizing.html" class="text-sm font-bold text-primary">Bet Sizing</a>
                 <span class="text-gray-400">|</span>
                 <a href="hand-analysis.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Hand Analysis</a>
+                <span class="text-gray-400">|</span>
+                <a href="leak-quiz.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Leak Quiz</a>
             </div>
         </nav>
         
@@ -123,7 +125,21 @@
                         </div>
                         
                         <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="villainRange">Opponent's Range</label>
+                            <div class="flex justify-between items-center">
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="villainRange">Opponent's Range</label>
+                                <select id="rangePreset" class="text-xs border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:ring-primary focus:border-primary">
+                                    <option value="">Select Preset...</option>
+                                    <option value="UTG">UTG Open</option>
+                                    <option value="UTG+1">UTG+1 Open</option>
+                                    <option value="UTG+2">UTG+2 Open</option>
+                                    <option value="LJ">Lojack Open</option>
+                                    <option value="HJ">Hijack Open</option>
+                                    <option value="CO">Cutoff Open</option>
+                                    <option value="BTN">Button Open</option>
+                                    <option value="SB">Small Blind Open</option>
+                                    <option value="BB">Big Blind Defense</option>
+                                </select>
+                            </div>
                             <input class="appearance-none rounded-lg relative block w-full px-3 py-4 border border-gray-300 dark:border-gray-700 bg-background-light dark:bg-background-dark placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:ring-primary focus:border-primary focus:z-10 text-base" id="villainRange" placeholder="e.g., TT+, AQs+, AKo" type="text" value="TT+, AQs+, AKo"/>
                             <p class="text-xs text-gray-500 dark:text-gray-400">Comma separated ranges</p>
                         </div>
