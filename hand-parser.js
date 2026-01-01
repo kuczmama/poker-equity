@@ -138,7 +138,7 @@ class CoinPokerParser {
                     if (dist === 5) pos = 'CO';
                 } else if (n === 7) {
                     if (dist === 3) pos = 'UTG';
-                    if (dist === 4) pos = 'UTG+1';
+                    if (dist === 4) pos = 'LJ';
                     if (dist === 5) pos = 'HJ';
                     if (dist === 6) pos = 'CO';
                 } else if (n === 9) {

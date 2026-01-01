@@ -129,6 +129,7 @@
                     <button class="palette-tool px-3 py-1 rounded text-xs font-bold bg-gradient-to-r from-red-600 to-green-500 text-white opacity-50 hover:opacity-100" data-tool="mix_raise_call">Mix R/C</button>
                     <button class="palette-tool px-3 py-1 rounded text-xs font-bold bg-gradient-to-r from-gray-600 to-red-600 text-white opacity-50 hover:opacity-100" data-tool="mix_fold_raise">Mix F/R</button>
                     <button class="palette-tool px-3 py-1 rounded text-xs font-bold bg-gradient-to-r from-gray-600 to-green-500 text-white opacity-50 hover:opacity-100" data-tool="mix_fold_call">Mix F/C</button>
+                    <button class="palette-tool px-3 py-1 rounded text-xs font-bold bg-gradient-to-r from-gray-600 via-green-500 to-red-600 text-white opacity-50 hover:opacity-100" data-tool="mix_fold_call_raise">Mix All</button>
                     <button class="palette-tool px-3 py-1 rounded text-xs font-bold bg-red-900 text-white opacity-50 hover:opacity-100" data-tool="allin">All-In</button>
                 </div>
                 
@@ -297,28 +298,22 @@
                     if (!handData.hero) throw new Error("Could not identify Hero in hand history.");
 
                     // 2. Derive Context from handData
-                    // This is the tricky part: mapping raw actions to our simplified GTO tree
-                    // We'll try to find the last aggressor before Hero acted in Preflop
                     
-                    const heroSeat = handData.hero.seatObj.seat;
                     let actions = handData.preflopActions;
-                    
-                    // Simple logic: Find last Raise
                     let lastAggressor = null;
                     let lastRaiseAmount = 0;
                     
+                    // Filter actions to ignore LIMPS and COLD CALLS by villains
+                    // We only care about RAISES to define the GTO Context
                     for (let act of actions) {
-                        // Stop if we reach Hero's action? 
-                        // Actually we want the state *when* Hero makes their decision.
-                        // So we look at actions *before* Hero's first VPIP or decision
                         if (act.player === handData.hero.name) {
-                            // This is Hero's action. What happened before?
                             break; 
                         }
                         if (act.type === 'raise') {
                             lastAggressor = act;
                             lastRaiseAmount = act.amount;
                         }
+                        // Explicitly ignore 'call' (limp/cold call)
                     }
                     
                     let villainPos = 'Blinds';
@@ -330,9 +325,18 @@
                         const villainObj = handData.players.find(p => p.name === lastAggressor.player);
                         if (villainObj) {
                             villainPos = villainObj.pos;
-                            prevAction = `Raise ${lastAggressor.amount}`; // Approximate
+                            prevAction = `Raise ${lastAggressor.amount}`; 
                             isRFI = false;
                         }
+                    } else {
+                        // No raise found. Check if Hero is BB.
+                        // If Hero is BB and no raise, it implies Limps or Fold to BB.
+                        // If Limps, user said "calling/limping not supported".
+                        // We will treat Facing Limp as RFI (or Facing Min Raise?)
+                        // User said: "same for limping we can't support limps... put the closest range"
+                        // Closest to facing limp is usually RFI (checking option) or ISO Raise.
+                        // Let's stick to RFI logic for now, effectively ignoring the limpers.
+                        isRFI = true; 
                     }
 
                     // Attempt to fuzzy match the 'prevAction' to what we have in DB

@@ -15,9 +15,9 @@ class GTOTreeManager {
         };
         
         // 7-max Positions order
-        this.positions = ['UTG', 'UTG+1', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
+        this.positions = ['UTG', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
         this.stacks = {
-            'UTG': 100, 'UTG+1': 100, 'HJ': 100, 'CO': 100, 'BTN': 100, 'SB': 99.5, 'BB': 99
+            'UTG': 100, 'LJ': 100, 'HJ': 100, 'CO': 100, 'BTN': 100, 'SB': 99.5, 'BB': 99
         };
         
         this.db = null;
@@ -176,6 +176,7 @@ class GTOTreeManager {
             case 'mix_raise_call': return { raise: 0.5, call: 0.5 };
             case 'mix_fold_raise': return { fold: 0.5, raise: 0.5 };
             case 'mix_fold_call': return { fold: 0.5, call: 0.5 };
+            case 'mix_fold_call_raise': return { fold: 0.33, call: 0.33, raise: 0.34 };
             default: return { fold: 1.0 };
         }
     }
@@ -264,19 +265,6 @@ class GTOTreeManager {
             return JSON.parse(res[0].values[0][0]);
         }
         return { fold: 1.0 }; // Default
-    }
-    
-    applyToolStrategy() {
-        switch(this.currentTool) {
-            case 'raise': return { raise: 1.0 };
-            case 'call': return { call: 1.0 };
-            case 'fold': return { fold: 1.0 };
-            case 'allin': return { raise_all_in: 1.0 };
-            case 'mix_raise_call': return { raise: 0.5, call: 0.5 };
-            case 'mix_fold_raise': return { fold: 0.5, raise: 0.5 };
-            case 'mix_fold_call': return { fold: 0.5, call: 0.5 };
-            default: return { fold: 1.0 };
-        }
     }
 
     async saveDatabase() {
