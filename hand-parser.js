@@ -18,6 +18,12 @@ class CoinPokerParser {
             board: [],
             potSize: 0,
             preflopActions: [],
+            streets: {
+                preflop: { actions: [], potStart: 0, potEnd: 0 },
+                flop: { actions: [], card: [], potStart: 0, potEnd: 0 },
+                turn: { actions: [], card: [], potStart: 0, potEnd: 0 },
+                river: { actions: [], card: [], potStart: 0, potEnd: 0 }
+            },
             variant: 'NLHE'
         };
 
@@ -61,50 +67,81 @@ class CoinPokerParser {
 
             // Board
             if (line.startsWith('*** FLOP ***')) {
+                section = 'flop';
                 const match = line.match(/\[(.*?)\]/);
-                if (match) data.board = match[1].split(' ').map(c => c.replace('10', 'T'));
+                if (match) data.streets.flop.card = match[1].split(' ').map(c => c.replace('10', 'T'));
+            }
+            if (line.startsWith('*** TURN ***')) {
+                section = 'turn';
+                // Format: *** TURN *** [FlopCards] [TurnCard]
+                const match = line.match(/\] \[(.*?)\]/);
+                if (match) data.streets.turn.card = [match[1].replace('10', 'T')];
+            }
+            if (line.startsWith('*** RIVER ***')) {
+                section = 'river';
+                const match = line.match(/\] \[(.*?)\]/);
+                if (match) data.streets.river.card = [match[1].replace('10', 'T')];
             }
 
-            // Actions (Preflop focus for now)
+            // Actions
             if (line.startsWith('*** HOLE CARDS ***')) section = 'preflop';
-            if (line.startsWith('*** FLOP ***')) section = 'flop';
-            if (line.startsWith('*** TURN ***')) section = 'turn';
-            if (line.startsWith('*** RIVER ***')) section = 'river';
+            if (line.startsWith('*** SUMMARY ***')) section = 'summary';
 
-            if (section === 'preflop' && !line.startsWith('***')) {
+            if ((section === 'preflop' || section === 'flop' || section === 'turn' || section === 'river') && !line.startsWith('***')) {
                 // Parse "Player: action amount"
-                if (line.includes('folds')) this.recordAction(data, line, 'fold');
-                else if (line.includes('calls')) this.recordAction(data, line, 'call');
-                else if (line.includes('raises')) this.recordAction(data, line, 'raise');
-                else if (line.includes('checks')) this.recordAction(data, line, 'check');
-                else if (line.includes('posts')) this.recordAction(data, line, 'post');
+                let type = null;
+                if (line.includes('folds')) type = 'fold';
+                else if (line.includes('calls')) type = 'call';
+                else if (line.includes('raises')) type = 'raise';
+                else if (line.includes('checks')) type = 'check';
+                else if (line.includes('bets')) type = 'bet';
+                else if (line.includes('posts')) type = 'post';
+
+                if (type) {
+                    this.recordAction(data, line, type, section);
+                }
             }
         }
 
         this.calculatePositions(data);
+        this.processMath(data);
         return data;
     }
 
-    recordAction(data, line, type) {
+    recordAction(data, line, type, section) {
         // Simple extraction: "Name: type amount"
         const parts = line.split(':');
         const name = parts[0];
         
         // Extract amount if any
         let amount = 0;
+        // Check for "raises X to Y" - we want Y (total wager) for state tracking, but technically "call" is the difference.
+        // For simple pot tracking, we need the *added* amount.
+        
         const numbers = line.match(/([\d\.]+)/g);
+        let rawAmount = 0;
+        let addedAmount = 0;
+
         if (numbers) {
-            // "raises 0.10 to 0.15" -> take last number as the wager
-            // "calls 0.15" -> take last number
-            amount = parseFloat(numbers[numbers.length - 1]);
+            rawAmount = parseFloat(numbers[numbers.length - 1]);
         }
 
-        data.preflopActions.push({
+        data.streets[section].actions.push({
             player: name,
             type: type,
-            amount: amount,
+            amount: rawAmount, // This is usually the "to" amount or the call amount
             raw: line
         });
+        
+        // Populate flat preflopActions for backward compatibility
+        if (section === 'preflop') {
+            data.preflopActions.push({
+                player: name,
+                type: type,
+                amount: rawAmount,
+                raw: line
+            });
+        }
     }
 
     calculatePositions(data) {
@@ -130,8 +167,6 @@ class CoinPokerParser {
             else if (dist === 1) pos = 'SB';
             else if (dist === 2) pos = 'BB';
             else {
-                // Depending on table size, map UTG, MP, etc.
-                // Assuming 6-max or 7-max common on CoinPoker
                 if (n === 6) {
                     if (dist === 3) pos = 'UTG';
                     if (dist === 4) pos = 'HJ';
@@ -149,7 +184,6 @@ class CoinPokerParser {
                      if (dist === 7) pos = 'HJ';
                      if (dist === 8) pos = 'CO';
                 } else {
-                    // Fallback
                     pos = `Pos${dist}`;
                 }
             }
@@ -161,5 +195,98 @@ class CoinPokerParser {
             }
         });
     }
-}
 
+    processMath(data) {
+        // Replay hand to calculate Pot, Pot Odds, MDF at each step
+        let pot = 0;
+        let streetInvested = {}; // Map player -> amount invested this street
+        let currentBet = 0;
+        
+        ['preflop', 'flop', 'turn', 'river'].forEach(street => {
+            streetInvested = {};
+            currentBet = 0;
+            data.streets[street].potStart = pot;
+            
+            data.streets[street].actions.forEach(action => {
+                // Determine amount added to pot
+                let added = 0;
+                let playerInvested = streetInvested[action.player] || 0;
+
+                if (action.type === 'post') {
+                    added = action.amount;
+                    streetInvested[action.player] = playerInvested + added;
+                    if (added > currentBet) currentBet = added;
+                } else if (action.type === 'call') {
+                    // Call matches the current bet
+                    // Sometimes "calls 0.15" means adding 0.15
+                    added = action.amount;
+                    streetInvested[action.player] = playerInvested + added;
+                } else if (action.type === 'bet') {
+                    added = action.amount;
+                    streetInvested[action.player] = playerInvested + added;
+                    currentBet = added;
+                } else if (action.type === 'raise') {
+                    // "raises to X" -> X is total for street
+                    const total = action.amount;
+                    added = total - playerInvested;
+                    streetInvested[action.player] = total;
+                    currentBet = total;
+                } else if (action.type === 'check' || action.type === 'fold') {
+                    added = 0;
+                }
+
+                pot += added;
+                action.potAfter = pot;
+
+                // Calculate Math for Hero
+                if (data.hero && action.player === data.hero.name) {
+                    // If Hero just acted, what were they facing?
+                    // Pot Odds = CallAmount / (TotalPot + CallAmount)
+                    // We need to look at state *before* this action
+                    
+                    const heroPrevInvested = (streetInvested[action.player] || 0) - added;
+                    const amountToCall = currentBet - heroPrevInvested;
+                    const potBeforeHero = pot - added;
+
+                    if (amountToCall > 0 && (action.type === 'call' || action.type === 'fold' || action.type === 'raise')) {
+                        // Facing a bet
+                        const potOdds = amountToCall / (potBeforeHero + amountToCall);
+                        const mdf = 1 - (amountToCall / (potBeforeHero + amountToCall)); // Simple MDF approximation
+                        // Wait, MDF is Pot / (Pot + Bet) from defender's perspective? 
+                        // MDF = Pot / (Pot + Bet) ? No. 
+                        // MDF = 1 - Alpha. Alpha = Bet / (Pot + Bet).
+                        // If Pot is 100, Villain bets 50. Pot becomes 150.
+                        // Alpha = 50/150 = 33%. MDF = 67%.
+                        // Here potBeforeHero includes the Villain's bet.
+                        // So if Pot was 100, Villain bets 50 -> PotBeforeHero = 150.
+                        // AmountToCall = 50.
+                        // Pot Odds = 50 / (150 + 50) = 25%.
+                        
+                        // MDF: We use Pot Size *before* the bet for the formula?
+                        // Formula: MDF = PotSize / (PotSize + BetSize)
+                        // PotSize here is the pot BEFORE the villain bet.
+                        // So PotBeforeHero - AmountToCall.
+                        const potBase = potBeforeHero - amountToCall;
+                        // But there might be other players.
+                        // Simplified: MDF = (Pot including bet) / (Pot including bet + call) ? No.
+                        
+                        // Standard MDF = Pot / (Pot + Bet). 
+                        // Where Pot is what's in the middle before the bet.
+                        // Bet is the bet size.
+                        // Here potBeforeHero has the bet.
+                        // So MDF = (potBeforeHero - amountToCall) / potBeforeHero.
+                        
+                        // Let's stick to Pot Odds for Hero.
+                        action.math = {
+                            potOddsPct: (potOdds * 100).toFixed(1),
+                            amountToCall: amountToCall.toFixed(2),
+                            potSize: potBeforeHero.toFixed(2)
+                        };
+                    }
+                }
+            });
+            
+            data.streets[street].potEnd = pot;
+        });
+    }
+}

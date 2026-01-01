@@ -290,159 +290,38 @@
                 if(!text) return;
 
                 const originalText = analyzeBtn.textContent;
-                analyzeBtn.textContent = 'Parsing...';
+                analyzeBtn.textContent = 'Thinking...';
                 analyzeBtn.disabled = true;
 
+                // Switch to Chat Tab immediately to show progress
+                tabChat.click();
+                coachResponse.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full space-y-3">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                        <p class="text-gray-400 text-xs animate-pulse">Analyzing Streets & Fundamentals...</p>
+                    </div>
+                `;
+
                 try {
-                    // 1. Parse
-                    const handData = parser.parse(text);
-                    if (!handData.hero) throw new Error("Could not identify Hero in hand history.");
-
-                    // 1b. Determine Blinds Size (to convert $ to BB)
-                    let bbSize = 0.05; // Default fallback
-                    // Look for "posts big blind 0.05" line
-                    const bbAction = handData.preflopActions.find(a => a.type === 'post' && a.raw.includes('big blind'));
-                    if (bbAction) {
-                        bbSize = bbAction.amount;
-                    }
-
-                    // 2. Derive Context & Calculate Pot Odds
-                    let currentPot = 0;
+                    // Use the new centralized Full Hand Analysis
+                    const analysis = await treeManager.llm.analyzeFullHand(text, parser, treeManager);
                     
-                    let villainPos = 'Blinds';
-                    let villainName = null;
-                    let isRFI = true;
-                    let lastRaiseAmount = 0; // In currency
-                    
-                    // Simple tracking of player investments to calc Pot Odds
-                    const playersInvested = {}; 
+                    // Render Markdown-ish response
+                    // Simple formatter since we don't have 'marked' loaded
+                    let formatted = analysis
+                        .replace(/### (.*?)\n/g, '<h3 class="text-lg font-bold text-blue-400 mt-4 mb-2 border-b border-gray-700 pb-1">$1</h3>')
+                        .replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-200">$1</strong>')
+                        .replace(/- (.*?)\n/g, '<li class="ml-4 text-gray-300">$1</li>')
+                        .replace(/\n/g, '<br>');
 
-                    for (const act of handData.preflopActions) {
-                        // Stop before Hero's decision (if analyzing Hero's action)
-                        if (act.player === handData.hero.name && act.type !== 'post') {
-                            break;
-                        }
-
-                        // Track Pot Size
-                        // act.amount logic:
-                        // "raises to X" -> X is total
-                        // "calls X" -> X is added amount (in CoinPoker format usually)
-                        // "posts X" -> X is added
-                        // "posts ante X" -> X is added (dead)
-
-                        let isDead = act.type === 'post' && act.raw.includes('ante');
-                        let addedToPot = 0;
-                        
-                        if (isDead) {
-                            currentPot += act.amount;
-                            // Antes don't count towards 'playersInvested' for call matching usually
-                        } else {
-                            const prevInvested = playersInvested[act.player] || 0;
-                            let newTotal = 0;
-
-                            if (act.type === 'raise') {
-                                // "raises to X"
-                                newTotal = act.amount;
-                                addedToPot = newTotal - prevInvested;
-                            } else {
-                                // "calls X" or "posts X" (blind) -> X is added amount
-                                addedToPot = act.amount;
-                                newTotal = prevInvested + addedToPot;
-                            }
-                            
-                            playersInvested[act.player] = newTotal;
-                            currentPot += addedToPot;
-
-                            if (act.type === 'raise') {
-                                const villainObj = handData.players.find(p => p.name === act.player);
-                                if (villainObj) {
-                                    villainPos = villainObj.pos;
-                                    villainName = villainObj.name;
-                                    isRFI = false;
-                                    lastRaiseAmount = newTotal; // Currency
-                                }
-                            }
-                        }
-                    }
-
-                    // Calculate Pot Odds
-                    // Hero needs to call (lastRaiseAmount - heroInvested)
-                    let potOdds = null;
-                    if (lastRaiseAmount > 0) {
-                         const heroInvested = playersInvested[handData.hero.name] || 0;
-                         const callCost = lastRaiseAmount - heroInvested;
-                         
-                         if (callCost > 0) {
-                             // Odds = Call / (Pot_Before_Call + Call)
-                             potOdds = (callCost / (currentPot + callCost)) * 100;
-                         }
-                    }
-
-                    // 3. Get GTO Strategy (Fuzzy Match)
-                    let strategy = {};
-                    if (isRFI) {
-                        // RFI: Hero vs Blinds (Fold)
-                        strategy = treeManager.getStrategyForContext(handData.hero.pos, 'Blinds', 'Fold', true);
-                    } else {
-                        // Vs Raise: Fuzzy match the BB amount
-                        const raiseBB = lastRaiseAmount / bbSize;
-                        // Use the new fuzzy search method
-                        strategy = treeManager.findClosestStrategy(handData.hero.pos, villainPos, raiseBB);
-                    }
-
-                    // Normalize hand for DB lookup
-                    const canonicalHand = treeManager.normalizeHand(handData.hero.handStr);
-
-                    // 4. Estimate Equity (Database Driven)
-                    console.log('Starting Equity Calculation...');
-                    analyzeBtn.textContent = 'Calc Equity...';
-                    let equity = null;
-                    if (!isRFI) {
-                        // Calculate equity against Villain's DB range
-                        equity = await treeManager.estimateEquity(handData.hero.handStr, villainPos);
-                    }
-                    console.log('Equity Calculation Done:', equity);
-
-                    // 4b. Fetch Villain Stats
-                    let villainStats = null;
-                    if (villainName) {
-                        try {
-                            const res = await fetch(`/villain?name=${encodeURIComponent(villainName)}`);
-                            if (res.ok) {
-                                villainStats = await res.json();
-                            }
-                        } catch(e) {
-                            console.warn("Could not fetch villain stats", e);
-                        }
-                    }
-
-                    // 5. Send to LLM
-                    analyzeBtn.textContent = 'Analyzing...';
-                    
-                    tabChat.click();
-                    coachResponse.innerHTML = '<p class="animate-pulse text-gray-400">Analyzing hand history...</p>';
-
-                    const advice = await treeManager.llm.analyzeHandHistory({
-                        heroName: handData.hero.name,
-                        heroPos: handData.hero.pos,
-                        heroHand: handData.hero.handStr,
-                        villainPos: villainPos,
-                        villainName: villainName,
-                        villainStats: villainStats,
-                        actionType: 'Preflop Decision', // Generic for now
-                        potOdds: potOdds,
-                        equity: equity,
-                        gtoStrategy: (Object.keys(strategy).length > 0) ? (strategy[canonicalHand] || { fold: 1 }) : null,
-                        rawHistory: text
-                    });
-
-                    coachResponse.innerHTML = advice.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    coachResponse.innerHTML = `<div class="prose prose-invert text-sm max-w-none">${formatted}</div>`;
 
                 } catch (e) {
                     console.error(e);
                     errorDisplay.textContent = e.message;
                     errorDisplay.classList.remove('hidden');
-                    tabHistory.click(); // Stay on history tab on error
+                    coachResponse.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+                    tabHistory.click(); // Switch back to error
                 } finally {
                     analyzeBtn.textContent = originalText;
                     analyzeBtn.disabled = false;

@@ -308,6 +308,25 @@ class GTOTreeManager {
         }
     }
 
+    getVillainStats(name) {
+        if (!this.db) return null;
+        try {
+            // Check if table exists
+            const check = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='villain_stats'");
+            if (check.length === 0 || check[0].values.length === 0) return null;
+    
+            const res = this.db.exec("SELECT * FROM villain_stats WHERE player_name = ?", [name]);
+            if (res.length > 0 && res[0].values.length > 0) {
+                const cols = res[0].columns;
+                const vals = res[0].values[0];
+                const stats = {};
+                cols.forEach((c, i) => stats[c] = vals[i]);
+                return stats;
+            }
+        } catch(e) { console.error("Error fetching villain stats:", e); }
+        return null;
+    }
+
     // --- Edit Logic ---
     applyToolStrategy() {
         switch(this.currentTool) {
@@ -721,33 +740,36 @@ class GTOTreeManager {
 let treeManager;
 
 document.addEventListener('DOMContentLoaded', () => {
-    const renderer = new GTORenderer();
-    const llm = new LLMService();
-    
-    treeManager = new GTOTreeManager(renderer, llm);
-    window.treeManager = treeManager;
-    treeManager.init();
-    
-    // Bind Edit/Save buttons if they exist
-    const editBtn = document.getElementById('edit-mode-btn');
-    if (editBtn) editBtn.addEventListener('click', () => treeManager.toggleEditMode());
-    
-    const saveBtn = document.getElementById('save-db-btn');
-    if (saveBtn) saveBtn.addEventListener('click', () => treeManager.saveDatabase());
+    // Only init if we are on the page with tree-controls
+    if (document.getElementById('tree-controls') || document.getElementById('gto-grid-container')) {
+        const renderer = new GTORenderer();
+        const llm = new LLMService();
+        
+        treeManager = new GTOTreeManager(renderer, llm);
+        window.treeManager = treeManager;
+        treeManager.init();
+        
+        // Bind Edit/Save buttons if they exist
+        const editBtn = document.getElementById('edit-mode-btn');
+        if (editBtn) editBtn.addEventListener('click', () => treeManager.toggleEditMode());
+        
+        const saveBtn = document.getElementById('save-db-btn');
+        if (saveBtn) saveBtn.addEventListener('click', () => treeManager.saveDatabase());
 
-    // Bind Copy/Paste
-    const copyBtn = document.getElementById('copy-range-btn');
-    if (copyBtn) copyBtn.addEventListener('click', () => treeManager.copyCurrentRange());
-    
-    const pasteBtn = document.getElementById('paste-range-btn');
-    if (pasteBtn) pasteBtn.addEventListener('click', () => treeManager.pasteRange());
+        // Bind Copy/Paste
+        const copyBtn = document.getElementById('copy-range-btn');
+        if (copyBtn) copyBtn.addEventListener('click', () => treeManager.copyCurrentRange());
+        
+        const pasteBtn = document.getElementById('paste-range-btn');
+        if (pasteBtn) pasteBtn.addEventListener('click', () => treeManager.pasteRange());
 
-    // Bind Paint Palette Tools
-    const tools = document.querySelectorAll('.palette-tool');
-    tools.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const tool = e.target.dataset.tool;
-            treeManager.setTool(tool);
+        // Bind Paint Palette Tools
+        const tools = document.querySelectorAll('.palette-tool');
+        tools.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tool = e.target.dataset.tool;
+                treeManager.setTool(tool);
+            });
         });
-    });
+    }
 });
