@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Opponent Database - Poker Odds</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#38e07b",
+              "background-light": "#f6f8f7",
+              "background-dark": "#122017",
+            },
+            fontFamily: {
+              display: ["Space Grotesk"],
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+    <div class="flex flex-col min-h-screen">
+        <nav class="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-gray-200 dark:border-gray-700">
+            <div class="max-w-md mx-auto flex justify-center space-x-4">
+                <a href="index.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Single Hand Calculator</a>
+                <span class="text-gray-400">|</span>
+                <a href="range-equity.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Range Calculator</a>
+                <span class="text-gray-400">|</span>
+                <a href="range-visual.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Visual Range</a>
+                <span class="text-gray-400">|</span>
+                <a href="bet-sizing.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">Bet Sizing</a>
+                <span class="text-gray-400">|</span>
+                <a href="gto-charts.html" class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary">GTO Charts</a>
+                <span class="text-gray-400">|</span>
+                <a href="villains.html" class="text-sm font-bold text-primary">Villains</a>
+            </div>
+        </nav>
+        
+        <main class="flex-grow py-12 px-4 sm:px-6 lg:px-8">
+            <div class="w-full max-w-6xl mx-auto space-y-8">
+                <div>
+                    <h1 class="text-center text-3xl font-bold text-gray-900 dark:text-white">Opponent Database</h1>
+                    <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">Sync with PokerTracker 4 to categorize players.</p>
+                </div>
+                
+                <div class="w-full p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+                    <div class="flex justify-between items-center mb-6">
+                        <div class="flex items-center space-x-4">
+                             <button id="syncPt4Btn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
+                                Sync from PT4
+                            </button>
+                            <span id="syncStatus" class="text-sm text-gray-500 dark:text-gray-400"></span>
+                        </div>
+                        <input type="text" id="searchVillain" placeholder="Search player..." class="px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary">
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" id="villainTable">
+                            <thead class="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer" onclick="sortTable('name')">Name</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer" onclick="sortTable('hands')">Hands</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">VPIP / PFR</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">3-Bet</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">WSD</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Type</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                <!-- Rows injected by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Villain Database Logic
+        const syncBtn = document.getElementById('syncPt4Btn');
+        const statusSpan = document.getElementById('syncStatus');
+        const tbody = document.querySelector('#villainTable tbody');
+        const searchInput = document.getElementById('searchVillain');
+        
+        let villainsData = [];
+
+        syncBtn.addEventListener('click', async () => {
+            statusSpan.textContent = "Syncing... (this may take a moment)";
+            syncBtn.disabled = true;
+            syncBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            try {
+                const res = await fetch('/sync-pt4', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    statusSpan.textContent = `Success! Updated ${data.count} players.`;
+                    statusSpan.className = "text-sm text-green-600 dark:text-green-400";
+                    loadVillains(); // Refresh table
+                } else {
+                    statusSpan.textContent = `Error: ${data.error}`;
+                    statusSpan.className = "text-sm text-red-600 dark:text-red-400";
+                }
+            } catch (e) {
+                statusSpan.textContent = "Network Error";
+                statusSpan.className = "text-sm text-red-600 dark:text-red-400";
+            } finally {
+                syncBtn.disabled = false;
+                syncBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        });
+
+        async function loadVillains() {
+            try {
+                const res = await fetch('/villains');
+                if (!res.ok) return;
+                villainsData = await res.json();
+                renderTable(villainsData);
+            } catch (e) {
+                console.error("Failed to load villains", e);
+            }
+        }
+        
+        function renderTable(data) {
+            tbody.innerHTML = '';
+            
+            data.forEach(v => {
+                // Logic for Color Coding (CoinPoker System)
+                let colorClass = 'text-gray-900 dark:text-white';
+                let archetype = 'Unknown';
+
+                // Safe Parsing
+                const vpip = v.vpip || 0;
+                const pfr = v.pfr || 0;
+                const wsd = v.wsd || 0;
+                const threeBet = v.three_bet || 0;
+
+                // 1. RED (Danger / Aggressive Reg)
+                if (threeBet > 8 && vpip > 20 && (vpip - pfr) < 6) {
+                    colorClass = 'text-red-600 font-bold';
+                    archetype = 'DANGER (RED)';
+                }
+                // 2. ORANGE (Nit / Tight Reg)
+                else if (vpip < 20 && threeBet < 4 && wsd > 60) {
+                        colorClass = 'text-orange-500 font-bold';
+                        archetype = 'NIT (ORANGE)';
+                }
+                // 3. GREEN (Fish / Whale)
+                else if (vpip > 35 && (vpip - pfr) > 15) {
+                    colorClass = 'text-green-600 font-bold';
+                    archetype = 'FISH (GREEN)';
+                }
+                // 4. LIGHT BLUE (Passive Reg)
+                else if (vpip >= 20 && vpip <= 28 && pfr < 18) {
+                    colorClass = 'text-blue-400 font-bold';
+                    archetype = 'PASSIVE (BLUE)';
+                }
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">${v.player_name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">${v.hands}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">${vpip.toFixed(1)} / ${pfr.toFixed(1)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">${threeBet.toFixed(1)}%</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">${wsd.toFixed(1)}%</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm ${colorClass}">${archetype}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            const filtered = villainsData.filter(v => v.player_name.toLowerCase().includes(term));
+            renderTable(filtered);
+        });
+
+        // Load on startup
+        loadVillains();
+    </script>
+</body>
+</html>
+

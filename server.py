@@ -1,14 +1,43 @@
 import http.server
 import socketserver
 import os
-import cgi
+import json
+import scripts.pt4_service as pt4_service
 
 PORT = 8000
 DB_FILE = 'data/gto.db'
 
 class PokerHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        # Serve the Villain Data
+        if self.path == '/villains':
+            try:
+                data = pt4_service.get_villains()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+            except Exception as e:
+                self.send_error(500, str(e))
+        else:
+            # Default behavior (serve static files)
+            super().do_GET()
+
     def do_POST(self):
-        if self.path == '/save-db':
+        if self.path == '/sync-pt4':
+            try:
+                result = pt4_service.sync_from_pt4()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode('utf-8'))
+            except Exception as e:
+                print(f"Sync error: {e}")
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
+        elif self.path == '/save-db':
             try:
                 # Get the length of the data
                 content_length = int(self.headers['Content-Type']) if 'Content-Type' in self.headers and self.headers['Content-Type'].isdigit() else int(self.headers.get('Content-Length', 0))
@@ -38,4 +67,3 @@ class PokerHandler(http.server.SimpleHTTPRequestHandler):
 print(f"Serving at http://localhost:{PORT}")
 with socketserver.TCPServer(("", PORT), PokerHandler) as httpd:
     httpd.serve_forever()
-
