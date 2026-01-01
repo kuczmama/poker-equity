@@ -102,25 +102,26 @@ class GTOTreeManager {
         const activePos = this.positions[this.currentPosIndex];
         const context = this.deriveContext();
         
+        return this.getStrategyForContext(activePos, context.villainPos, context.prevAction, context.isRFI);
+    }
+
+    getStrategyForContext(heroPos, villainPos, prevAction, isRFI) {
+        if (!this.db) return {};
+
         // Build Base Query with context filters
         let query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain AND prev_action = :prev";
         let params = {
-            ':hero': activePos,
-            ':villain': context.villainPos,
-            ':prev': context.prevAction
+            ':hero': heroPos,
+            ':villain': villainPos,
+            ':prev': prevAction
         };
 
         // RFI overrides
-        if (context.isRFI) {
+        if (isRFI) {
              query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
+             params = { ':hero': heroPos };
         }
         
-        // Add Game Config Filters (Optional: strict matching)
-        // Ideally we filter by table_size too, but let's be loose for now unless exact match needed
-        // query += " AND table_size = :size AND stack_depth = :stack";
-        // params[':size'] = this.config.tableSize;
-        // params[':stack'] = this.config.stackDepth;
-
         const stmt = this.db.prepare(query);
         stmt.bind(params);
         
@@ -594,6 +595,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const llm = new LLMService();
     
     treeManager = new GTOTreeManager(renderer, llm);
+    window.treeManager = treeManager;
     treeManager.init();
     
     // Bind Edit/Save buttons if they exist

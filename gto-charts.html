@@ -155,18 +155,37 @@
                 </div>
             </div>
 
-            <!-- AI Coach -->
-            <div class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700 flex-grow flex flex-col">
-                <div class="flex justify-between items-center border-b border-gray-700 pb-2 mb-3">
-                    <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wide">AI Coach Analysis</h2>
-                    <label class="flex items-center text-xs gap-2 cursor-pointer">
-                        <input type="checkbox" id="auto-analyze" class="form-checkbox bg-gray-900 border-gray-600 rounded text-primary focus:ring-0">
-                        <span>Auto-Ask</span>
-                    </label>
-                </div>
+            <!-- Hand History Analyzer -->
+            <div class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700 flex-grow flex flex-col min-h-[400px]">
+                <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wide border-b border-gray-700 pb-2 mb-3">Hand Analysis</h2>
                 
-                <div id="coach-response" class="flex-grow overflow-y-auto text-sm text-gray-300 leading-relaxed bg-gray-900/50 p-3 rounded">
-                    <p class="italic text-gray-500">Click a hand to ask the coach for advice.</p>
+                <!-- Tabs -->
+                <div class="flex gap-2 mb-2 text-xs">
+                    <button id="tab-chat" class="px-2 py-1 bg-gray-700 text-white rounded">Chat</button>
+                    <button id="tab-history" class="px-2 py-1 bg-gray-900 text-gray-400 rounded hover:bg-gray-700">Paste History</button>
+                </div>
+
+                <!-- Chat Mode -->
+                <div id="chat-mode-container" class="flex-grow flex flex-col">
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="flex items-center text-xs gap-2 cursor-pointer">
+                            <input type="checkbox" id="auto-analyze" class="form-checkbox bg-gray-900 border-gray-600 rounded text-primary focus:ring-0">
+                            <span>Auto-Ask on Selection</span>
+                        </label>
+                    </div>
+                    
+                    <div id="coach-response" class="flex-grow overflow-y-auto text-sm text-gray-300 leading-relaxed bg-gray-900/50 p-3 rounded h-48">
+                        <p class="italic text-gray-500">Click a hand or paste history to ask for advice.</p>
+                    </div>
+                </div>
+
+                <!-- History Mode -->
+                <div id="history-mode-container" class="hidden flex-col gap-2 flex-grow">
+                    <textarea id="hand-history-input" class="w-full h-32 bg-gray-900 border border-gray-600 rounded p-2 text-xs text-gray-300 font-mono" placeholder="Paste CoinPoker Hand History here..."></textarea>
+                    <div class="flex justify-end">
+                        <button id="analyze-hand-btn" class="px-4 py-2 bg-secondary hover:bg-green-600 text-white rounded font-bold text-xs">Analyze Hand</button>
+                    </div>
+                    <div id="analysis-error" class="text-red-400 text-xs mt-1 hidden"></div>
                 </div>
             </div>
         </div>
@@ -182,6 +201,11 @@
                 <input type="password" id="api-key-input" class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:border-primary focus:outline-none" placeholder="sk-or-...">
                 <p class="text-xs text-gray-500 mt-1">Key is stored locally in your browser.</p>
             </div>
+             <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">LLM Model</label>
+                <input type="text" id="model-input" class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:border-primary focus:outline-none" placeholder="google/gemini-2.0-pro-exp-02-05:free">
+                <p class="text-xs text-gray-500 mt-1">E.g., google/gemini-2.0-pro-exp-02-05:free or anthropic/claude-3-haiku</p>
+            </div>
             <div class="flex justify-end gap-2">
                 <button id="close-settings" class="px-4 py-2 text-gray-300 hover:text-white">Cancel</button>
                 <button id="save-settings" class="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded">Save</button>
@@ -191,6 +215,8 @@
 
     <!-- Scripts -->
     <script src="lib/sql-wasm.js"></script>
+    <script src="poker-logic.js"></script> <!-- Ensure PokerLogic/OddsCalculator is available if needed -->
+    <script src="hand-parser.js"></script>
     <script src="llm-service.js"></script>
     <script src="gto-renderer.js"></script>
     <script src="gto-tree-manager.js"></script>
@@ -203,14 +229,13 @@
              const btn = document.getElementById('settings-btn');
              const closeBtn = document.getElementById('close-settings');
              const saveBtn = document.getElementById('save-settings');
-             const input = document.getElementById('api-key-input');
-             
-             // We need access to the llm instance from treeManager
-             // treeManager is global in gto-tree-manager.js
+             const apiInput = document.getElementById('api-key-input');
+             const modelInput = document.getElementById('model-input');
              
              btn.addEventListener('click', () => {
                  if (window.treeManager && window.treeManager.llm) {
-                    input.value = window.treeManager.llm.apiKey;
+                    apiInput.value = window.treeManager.llm.apiKey;
+                    modelInput.value = window.treeManager.llm.model;
                  }
                  modal.classList.remove('hidden');
              });
@@ -219,12 +244,151 @@
  
              saveBtn.addEventListener('click', () => {
                  if (window.treeManager && window.treeManager.llm) {
-                    window.treeManager.llm.setApiKey(input.value);
+                    window.treeManager.llm.setApiKey(apiInput.value);
+                    window.treeManager.llm.setModel(modelInput.value);
                  }
                  modal.classList.add('hidden');
+             });
+
+             // Tab Switching
+             const tabChat = document.getElementById('tab-chat');
+             const tabHistory = document.getElementById('tab-history');
+             const chatContainer = document.getElementById('chat-mode-container');
+             const historyContainer = document.getElementById('history-mode-container');
+
+             tabChat.addEventListener('click', () => {
+                 chatContainer.classList.remove('hidden');
+                 historyContainer.classList.add('hidden');
+                 tabChat.classList.add('bg-gray-700', 'text-white');
+                 tabChat.classList.remove('bg-gray-900', 'text-gray-400');
+                 tabHistory.classList.remove('bg-gray-700', 'text-white');
+                 tabHistory.classList.add('bg-gray-900', 'text-gray-400');
+             });
+
+             tabHistory.addEventListener('click', () => {
+                 historyContainer.classList.remove('hidden');
+                 historyContainer.classList.add('flex');
+                 chatContainer.classList.add('hidden');
+                 tabHistory.classList.add('bg-gray-700', 'text-white');
+                 tabHistory.classList.remove('bg-gray-900', 'text-gray-400');
+                 tabChat.classList.remove('bg-gray-700', 'text-white');
+                 tabChat.classList.add('bg-gray-900', 'text-gray-400');
+             });
+
+             // Hand Analysis Logic
+             const parser = new CoinPokerParser();
+             const analyzeBtn = document.getElementById('analyze-hand-btn');
+             const historyInput = document.getElementById('hand-history-input');
+             const errorDisplay = document.getElementById('analysis-error');
+             const coachResponse = document.getElementById('coach-response');
+
+             analyzeBtn.addEventListener('click', async () => {
+                errorDisplay.classList.add('hidden');
+                const text = historyInput.value;
+                if(!text) return;
+
+                const originalText = analyzeBtn.textContent;
+                analyzeBtn.textContent = 'Parsing...';
+                analyzeBtn.disabled = true;
+
+                try {
+                    // 1. Parse
+                    const handData = parser.parse(text);
+                    if (!handData.hero) throw new Error("Could not identify Hero in hand history.");
+
+                    // 2. Derive Context from handData
+                    // This is the tricky part: mapping raw actions to our simplified GTO tree
+                    // We'll try to find the last aggressor before Hero acted in Preflop
+                    
+                    const heroSeat = handData.hero.seatObj.seat;
+                    let actions = handData.preflopActions;
+                    
+                    // Simple logic: Find last Raise
+                    let lastAggressor = null;
+                    let lastRaiseAmount = 0;
+                    
+                    for (let act of actions) {
+                        // Stop if we reach Hero's action? 
+                        // Actually we want the state *when* Hero makes their decision.
+                        // So we look at actions *before* Hero's first VPIP or decision
+                        if (act.player === handData.hero.name) {
+                            // This is Hero's action. What happened before?
+                            break; 
+                        }
+                        if (act.type === 'raise') {
+                            lastAggressor = act;
+                            lastRaiseAmount = act.amount;
+                        }
+                    }
+                    
+                    let villainPos = 'Blinds';
+                    let prevAction = 'Fold';
+                    let isRFI = true;
+
+                    if (lastAggressor) {
+                        // Find position of aggressor
+                        const villainObj = handData.players.find(p => p.name === lastAggressor.player);
+                        if (villainObj) {
+                            villainPos = villainObj.pos;
+                            prevAction = `Raise ${lastAggressor.amount}`; // Approximate
+                            isRFI = false;
+                        }
+                    }
+
+                    // Attempt to fuzzy match the 'prevAction' to what we have in DB
+                    // e.g. "Raise 0.15" (3bb) -> "Raise 3" or "Raise 2.5"
+                    // For now, we'll try exact, then fallback? 
+                    // Actually, let's just use the raw extracted pos and pass to LLM.
+                    // The LLM needs the GTO strategy. We try to fetch it.
+                    
+                    // TODO: Improve mapping of "0.15" -> "Raise 3"
+                    // For now, just try to find a scenario that matches Position
+                    
+                    // We can try to fetch strategy for "Raise 2.5" or "Raise 3" if we see a raise
+                    let strategy = {};
+                    if (!isRFI) {
+                        // Try common sizes
+                        strategy = treeManager.getStrategyForContext(handData.hero.pos, villainPos, 'Raise 2.5', false);
+                        if (Object.keys(strategy).length === 0) {
+                             strategy = treeManager.getStrategyForContext(handData.hero.pos, villainPos, 'Raise 3', false);
+                        }
+                    } else {
+                        // RFI
+                        strategy = treeManager.getStrategyForContext(handData.hero.pos, 'Blinds', 'Fold', true);
+                    }
+
+                    // 3. Send to LLM
+                    analyzeBtn.textContent = 'Analyzing...';
+                    
+                    // Switch to chat view to show result
+                    tabChat.click();
+                    coachResponse.innerHTML = '<p class="animate-pulse text-gray-400">Analyzing hand history...</p>';
+
+                    const advice = await treeManager.llm.analyzeHandHistory({
+                        heroName: handData.hero.name,
+                        heroPos: handData.hero.pos,
+                        heroHand: handData.hero.handStr,
+                        villainPos: villainPos,
+                        actionType: 'Preflop Decision', // Generic for now
+                        potOdds: null, // TODO: Calc from pot size
+                        equity: null, // TODO: Calc
+                        gtoStrategy: (Object.keys(strategy).length > 0) ? (strategy[handData.hero.handStr] || { fold: 1 }) : null,
+                        rawHistory: text
+                    });
+
+                    coachResponse.innerHTML = advice.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+                } catch (e) {
+                    console.error(e);
+                    errorDisplay.textContent = e.message;
+                    errorDisplay.classList.remove('hidden');
+                    tabHistory.click(); // Stay on history tab on error
+                } finally {
+                    analyzeBtn.textContent = originalText;
+                    analyzeBtn.disabled = false;
+                }
              });
         });
     </script>
 </body>
 </html>
-

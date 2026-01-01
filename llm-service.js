@@ -6,12 +6,17 @@ class LLMService {
     constructor() {
         this.apiKey = localStorage.getItem('openrouter_api_key') || '';
         this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-        this.model = 'anthropic/claude-3-haiku'; // Good default: cheap & fast
+        this.model = localStorage.getItem('openrouter_model') || 'google/gemini-2.0-pro-exp-02-05:free';
     }
 
     setApiKey(key) {
         this.apiKey = key;
         localStorage.setItem('openrouter_api_key', key);
+    }
+
+    setModel(model) {
+        this.model = model;
+        localStorage.setItem('openrouter_model', model);
     }
 
     hasApiKey() {
@@ -72,5 +77,69 @@ INSTRUCTIONS:
             throw error;
         }
     }
-}
 
+    // New method for full hand history analysis
+    async analyzeHandHistory(data) {
+        if (!this.apiKey) throw new Error('API Key missing');
+
+        // Hallucination Check: If no GTO strategy found, we fail fast or warn.
+        let strategyInfo = "";
+        if (data.gtoStrategy) {
+            strategyInfo = `- GTO Strategy for ${data.heroHand}: ${JSON.stringify(data.gtoStrategy)}`;
+        } else {
+            strategyInfo = `- GTO Strategy: NOT FOUND in database (Use general poker theory)`;
+        }
+
+        const systemPrompt = `
+You are a Poker Analyst. I have pre-calculated the exact game state for you.
+DO NOT hallucinate pot odds, positions, or stack sizes. Use the provided values.
+
+GAME STATE:
+- Hero: ${data.heroName} (${data.heroPos})
+- Hand: ${data.heroHand}
+- Action to Analyze: ${data.actionType}
+- Pot Odds: ${data.potOdds ? data.potOdds.toFixed(1) + '%' : 'N/A'} (Required Equity)
+- Hand Equity: ${data.equity ? data.equity.toFixed(1) + '%' : 'N/A'} (Estimated vs Range)
+- Relevant Villain: ${data.villainPos}
+
+GTO DATA (Ground Truth):
+${strategyInfo}
+
+TASK:
+1. Compare Hero's actual play vs the GTO frequency provided above (if available).
+2. If Pot Odds < Equity, highlight it as a mathematical call/value bet.
+3. Be ruthless about deviations from the GTO strategy provided.
+4. If GTO data is missing, rely on standard 100bb GTO principles for 6-max/7-max NLHE.
+`;
+
+        try {
+            const response = await fetch(this.baseUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'HTTP-Referer': window.location.origin,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: this.model,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: `Here is the full hand history:\n\n${data.rawHistory}` }
+                    ]
+                })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error?.message || 'API Request failed');
+            }
+
+            const resData = await response.json();
+            return resData.choices[0].message.content;
+
+        } catch (error) {
+            console.error('LLM Error:', error);
+            throw error;
+        }
+    }
+}
