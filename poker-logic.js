@@ -427,20 +427,20 @@ class OddsCalculator {
             }
         }
         
-        // Convert cards to pokersolver format
-        const hand1Str = [...hand1Cards, ...communityCards].map(c => this.cardToString(c));
-        const hand2Str = [...hand2Cards, ...communityCards].map(c => this.cardToString(c));
+        // Combine cards
+        const hand1Full = [...hand1Cards, ...communityCards];
+        const hand2Full = [...hand2Cards, ...communityCards];
         
-        // Evaluate hands using real pokersolver library
-        const hand1Best = Hand.solve(hand1Str);
-        const hand2Best = Hand.solve(hand2Str);
+        // Evaluate hands using PokerSolver.evaluateHand (handles 7 cards)
+        const hand1Best = PokerSolver.evaluateHand(hand1Full);
+        const hand2Best = PokerSolver.evaluateHand(hand2Full);
         
-        // Compare hands (pokersolver returns winners array)
-        const winners = Hand.winners([hand1Best, hand2Best]);
+        // Compare hands
+        const result = PokerSolver.compareHands(hand1Best, hand2Best);
         
-        if (winners.length === 2) {
+        if (result === 0) {
             return 0; // Tie
-        } else if (winners[0] === hand1Best) {
+        } else if (result > 0) {
             return 1; // Hand 1 wins
         } else {
             return -1; // Hand 2 wins
@@ -618,7 +618,6 @@ class OddsCalculator {
         hand2Cards.forEach(card => usedCards.add(`${card.rank}-${card.suit}`));
         boardCards.forEach(card => usedCards.add(`${card.rank}-${card.suit}`));
 
-        const neededCards = 5 - boardCards.length;
         const suits = ['h', 'd', 'c', 's'];
         const ranks = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
 
@@ -638,20 +637,20 @@ class OddsCalculator {
                 }
             }
 
-            // Convert cards to pokersolver format
-            const hand1Str = [...hand1Cards, ...communityCards].map(c => this.cardToString(c));
-            const hand2Str = [...hand2Cards, ...communityCards].map(c => this.cardToString(c));
+            // Combine cards
+            const hand1Full = [...hand1Cards, ...communityCards];
+            const hand2Full = [...hand2Cards, ...communityCards];
             
-            // Evaluate hands
-            const hand1Best = Hand.solve(hand1Str);
-            const hand2Best = Hand.solve(hand2Str);
+            // Evaluate hands using PokerSolver.evaluateHand (handles 7 cards)
+            const hand1Best = PokerSolver.evaluateHand(hand1Full);
+            const hand2Best = PokerSolver.evaluateHand(hand2Full);
             
-            // Compare hands
-            const winners = Hand.winners([hand1Best, hand2Best]);
+            // Compare
+            const result = PokerSolver.compareHands(hand1Best, hand2Best);
             
-            if (winners.length === 2) {
+            if (result === 0) {
                 ties++;
-            } else if (winners[0] === hand1Best) {
+            } else if (result > 0) {
                 hand1Wins++;
             } else {
                 hand2Wins++;

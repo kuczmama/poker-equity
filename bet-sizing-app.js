@@ -1,3 +1,16 @@
+// Predefined position ranges
+const POSITION_RANGES = {
+    'UTG': 'A4s+,K9s+,QTs+,77+,AJo+,JTs',
+    'UTG+1': 'A3s+,K9s+,QTs+,77+,AJo+,JTs',
+    'UTG+2': 'A3s+,K5s+,Q9s+,77+,ATo+,JTs,T9s,KJo+',
+    'LJ': 'A2s+,K5s+,Q9s+,J9s+,66+,T9s,ATo+',
+    'HJ': 'A2s+,K5s+,Q8s+,J9s+,55+,T9s,A9o+,T8s',
+    'CO': 'A5o,A8o+,KTo+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,44+,87s,97s,98s',
+    'BTN': 'A3o+,A8o+,K8o+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,22+,87s,97s,98s,54s,65s,75s,96s+,T8o',
+    'SB': 'A3o+,A8o+,K8o+,QTo+,JTo+,A2s+,K2s+,Q5s+,J7s+,T8s+,22+,87s,97s,98s,54s,65s,75s,96s+',
+    'BB': '22+,A2+,K2+,Q2+,J2+,T2+,92+,82+,72+,62+,52+,42+,32+,A2s+,K2s+,Q2s+,J2s+,T2s+,92s+,82s+,72s+,62s+,52s+,42s+,32s+'
+};
+
 class BetSizingApp {
     constructor() {
         this.initializeElements();
@@ -15,6 +28,7 @@ class BetSizingApp {
         this.heroHandInput = document.getElementById('heroHand');
         this.villainRangeInput = document.getElementById('villainRange');
         this.villainTypeSelect = document.getElementById('villainType');
+        this.rangePresetSelect = document.getElementById('rangePreset');
         
         // Buttons
         this.calculateBtn = document.getElementById('calculateBtn');
@@ -40,6 +54,16 @@ class BetSizingApp {
             this.renderCardGrid();
             this.updateBoardInput();
         });
+
+        // Range Preset Change
+        if (this.rangePresetSelect) {
+            this.rangePresetSelect.addEventListener('change', (e) => {
+                const range = POSITION_RANGES[e.target.value];
+                if (range) {
+                    this.villainRangeInput.value = range;
+                }
+            });
+        }
         
         // Close modal on outside click (if clicking the backdrop)
         this.modal.addEventListener('click', (e) => {
@@ -354,7 +378,7 @@ class BetSizingApp {
 
     async runEquitySim(hand, range, board) {
         await new Promise(r => setTimeout(r, 0));
-        return OddsCalculator.calculateRangeEquity(hand, range, board, 2000); 
+        return OddsCalculator.calculateRangeEquity(hand, range, board, 20000); 
     }
 
     displayResults(results, potSize) {
