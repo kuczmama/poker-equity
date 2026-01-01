@@ -342,6 +342,75 @@ class GTOTreeManager {
         this.updateView();
     }
 
+    // --- Copy/Paste Logic ---
+    copyCurrentRange() {
+        const strategy = this.getStrategyForCurrentState();
+        if (Object.keys(strategy).length === 0) {
+            alert("No range to copy!");
+            return;
+        }
+        localStorage.setItem('poker_copied_range', JSON.stringify(strategy));
+        
+        // Visual feedback
+        const btn = document.getElementById('copy-range-btn');
+        if(btn) {
+            const original = btn.textContent;
+            btn.textContent = '✅';
+            setTimeout(() => btn.textContent = original, 1000);
+        }
+    }
+
+    pasteRange() {
+        if (!this.editMode) {
+            alert("Please enable Edit Mode (✏️) to paste ranges.");
+            return;
+        }
+        
+        const raw = localStorage.getItem('poker_copied_range');
+        if (!raw) {
+            alert("Clipboard empty!");
+            return;
+        }
+        
+        try {
+            const strategy = JSON.parse(raw);
+            
+            // Apply to current scenario
+            const activePos = this.positions[this.currentPosIndex];
+            const context = this.deriveContext();
+            const scenarioId = this.getOrCreateScenarioId(activePos, context);
+            
+            // Bulk insert/update
+            // SQLite doesn't support bulk JSON insert easily in one query without constructing a huge string
+            // We'll iterate. Transaction would be faster.
+            
+            this.db.exec("BEGIN TRANSACTION");
+            const stmt = this.db.prepare("INSERT OR REPLACE INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)");
+            
+            for (const [hand, freqs] of Object.entries(strategy)) {
+                stmt.run([scenarioId, hand, JSON.stringify(freqs)]);
+            }
+            
+            stmt.free();
+            this.db.exec("COMMIT");
+            
+            this.debouncedSave();
+            this.updateView();
+            
+            // Visual feedback
+            const btn = document.getElementById('paste-range-btn');
+            if(btn) {
+                const original = btn.textContent;
+                btn.textContent = '✅';
+                setTimeout(() => btn.textContent = original, 1000);
+            }
+            
+        } catch (e) {
+            console.error("Paste failed", e);
+            alert("Failed to paste range: " + e.message);
+        }
+    }
+
     // --- Rendering ---
     renderTreeControls() {
         const container = document.getElementById('tree-controls');
@@ -353,6 +422,46 @@ class GTOTreeManager {
             const action = this.actions[pos];
             const stack = this.stacks[pos];
             
+            // Logic for available actions based on previous action
+            let prevBet = 1; // BB
+            if (index > 0) {
+                // Find last bet
+                // But simplified: check action history
+                // Actually, we just need to know if we are facing a raise.
+                // If previous action was a Raise, our raise options should be bigger (3-bet sizing).
+            }
+            
+            // Simple history check
+            const history = this.getActionHistory();
+            const lastAggressor = history.slice().reverse().find(a => a.action.includes('Raise') || a.action.includes('Allin'));
+            
+            let raiseLabel = 'Raise 2.5';
+            let raiseValue = 'Raise 2.5';
+            
+            // If facing a raise, next raise is a 3-bet (approx 3x)
+            if (lastAggressor) {
+                // If 2.5 -> 3bet to ~7.5 or 9
+                // Simplified logic from screenshot: 2 -> 6.5 -> 14 -> 25
+                if (lastAggressor.action.includes('2.5') || lastAggressor.action.includes('2')) {
+                    raiseLabel = 'Raise 9'; 
+                    raiseValue = 'Raise 9';
+                } else if (lastAggressor.action.includes('9') || lastAggressor.action.includes('6.5')) {
+                    raiseLabel = 'Raise 22'; // 4-bet
+                    raiseValue = 'Raise 22';
+                } else if (lastAggressor.action.includes('22') || lastAggressor.action.includes('14')) {
+                    raiseLabel = 'Raise 45'; // 5-bet
+                    raiseValue = 'Raise 45';
+                }
+            } else {
+                // RFI logic
+                // UTG-BTN: 2.5x is standard 100bb online. Live might be larger.
+                // SB RFI vs BB is usually 3x.
+                if (pos === 'SB') {
+                    raiseLabel = 'Raise 3';
+                    raiseValue = 'Raise 3';
+                }
+            }
+
             let content = '';
             
             if (isActive) {
@@ -361,7 +470,7 @@ class GTOTreeManager {
                     <div class="space-y-1 relative z-10">
                         <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-gray-400 border border-transparent hover:border-gray-500 transition-colors" onclick="treeManager.handleAction('${pos}', 'Fold')">Fold</button>
                         <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-green-400 font-bold border border-transparent hover:border-green-500 transition-colors" onclick="treeManager.handleAction('${pos}', 'Call')">Call</button>
-                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction('${pos}', 'Raise 2.5')">Raise 2.5</button>
+                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction('${pos}', '${raiseValue}')">${raiseLabel}</button>
                         <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction('${pos}', 'Allin 100')">Allin</button>
                     </div>
                 `;
@@ -475,6 +584,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const saveBtn = document.getElementById('save-db-btn');
     if (saveBtn) saveBtn.addEventListener('click', () => treeManager.saveDatabase());
+
+    // Bind Copy/Paste
+    const copyBtn = document.getElementById('copy-range-btn');
+    if (copyBtn) copyBtn.addEventListener('click', () => treeManager.copyCurrentRange());
+    
+    const pasteBtn = document.getElementById('paste-range-btn');
+    if (pasteBtn) pasteBtn.addEventListener('click', () => treeManager.pasteRange());
 
     // Bind Paint Palette Tools
     const tools = document.querySelectorAll('.palette-tool');
