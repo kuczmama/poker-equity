@@ -90,6 +90,11 @@ INSTRUCTIONS:
             strategyInfo = `- GTO Strategy: NOT FOUND in database (Use general poker theory)`;
         }
 
+        let villainInfo = `- Relevant Villain: ${data.villainPos} (Name: ${data.villainName || 'Unknown'})`;
+        if (data.villainStats) {
+            villainInfo += `\n- Villain Stats (PT4): VPIP: ${data.villainStats.vpip.toFixed(1)}, PFR: ${data.villainStats.pfr.toFixed(1)}, 3Bet: ${data.villainStats.three_bet.toFixed(1)}, Hands: ${data.villainStats.hands}`;
+        }
+
         const systemPrompt = `
 You are a Poker Analyst. I have pre-calculated the exact game state for you.
 DO NOT hallucinate pot odds, positions, or stack sizes. Use the provided values.
@@ -100,7 +105,7 @@ GAME STATE:
 - Action to Analyze: ${data.actionType}
 - Pot Odds: ${data.potOdds ? data.potOdds.toFixed(1) + '%' : 'N/A'} (Required Equity)
 - Hand Equity: ${data.equity ? data.equity.toFixed(1) + '%' : 'N/A'} (Estimated vs Range)
-- Relevant Villain: ${data.villainPos}
+${villainInfo}
 
 GTO DATA (Ground Truth):
 ${strategyInfo}
@@ -108,8 +113,9 @@ ${strategyInfo}
 TASK:
 1. Compare Hero's actual play vs the GTO frequency provided above (if available).
 2. If Pot Odds < Equity, highlight it as a mathematical call/value bet.
-3. Be ruthless about deviations from the GTO strategy provided.
-4. If GTO data is missing, rely on standard 100bb GTO principles for 6-max/7-max NLHE.
+3. Incorporate Villain Stats if available (e.g., if VPIP > 40, they are a fish; if 3Bet < 3, they are a nit).
+4. Be ruthless about deviations from the GTO strategy provided.
+5. If GTO data is missing, rely on standard 100bb GTO principles for 6-max/7-max NLHE.
 `;
 
         try {

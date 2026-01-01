@@ -2,6 +2,7 @@ import http.server
 import socketserver
 import os
 import json
+import urllib.parse
 import scripts.pt4_service as pt4_service
 
 PORT = 8000
@@ -10,9 +11,27 @@ DB_FILE = 'data/gto.db'
 class PokerHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         # Serve the Villain Data
-        if self.path == '/villains':
+        parsed_path = urllib.parse.urlparse(self.path)
+        if parsed_path.path == '/villains':
             try:
                 data = pt4_service.get_villains()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+            except Exception as e:
+                self.send_error(500, str(e))
+        elif parsed_path.path == '/villain':
+            try:
+                query_params = urllib.parse.parse_qs(parsed_path.query)
+                name = query_params.get('name', [None])[0]
+                
+                if not name:
+                    self.send_error(400, "Missing 'name' parameter")
+                    return
+
+                data = pt4_service.get_villain_stats(name)
+                
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()

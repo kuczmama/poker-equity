@@ -310,6 +310,7 @@
                     let currentPot = 0;
                     
                     let villainPos = 'Blinds';
+                    let villainName = null;
                     let isRFI = true;
                     let lastRaiseAmount = 0; // In currency
                     
@@ -356,6 +357,7 @@
                                 const villainObj = handData.players.find(p => p.name === act.player);
                                 if (villainObj) {
                                     villainPos = villainObj.pos;
+                                    villainName = villainObj.name;
                                     isRFI = false;
                                     lastRaiseAmount = newTotal; // Currency
                                 }
@@ -401,6 +403,19 @@
                     }
                     console.log('Equity Calculation Done:', equity);
 
+                    // 4b. Fetch Villain Stats
+                    let villainStats = null;
+                    if (villainName) {
+                        try {
+                            const res = await fetch(`/villain?name=${encodeURIComponent(villainName)}`);
+                            if (res.ok) {
+                                villainStats = await res.json();
+                            }
+                        } catch(e) {
+                            console.warn("Could not fetch villain stats", e);
+                        }
+                    }
+
                     // 5. Send to LLM
                     analyzeBtn.textContent = 'Analyzing...';
                     
@@ -412,6 +427,8 @@
                         heroPos: handData.hero.pos,
                         heroHand: handData.hero.handStr,
                         villainPos: villainPos,
+                        villainName: villainName,
+                        villainStats: villainStats,
                         actionType: 'Preflop Decision', // Generic for now
                         potOdds: potOdds,
                         equity: equity,
