@@ -1,0 +1,487 @@
+/*
+ * GTO Tree Manager
+ * Manages the state of the preflop action sequence and interacts with the SQLite DB.
+ */
+class GTOTreeManager {
+    constructor(renderer, llmService) {
+        this.renderer = renderer;
+        this.llm = llmService;
+        
+        // Game Configuration
+        this.config = {
+            variant: 'Cash',
+            tableSize: 7,
+            stackDepth: 100
+        };
+        
+        // 7-max Positions order
+        this.positions = ['UTG', 'UTG+1', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
+        this.stacks = {
+            'UTG': 100, 'UTG+1': 100, 'HJ': 100, 'CO': 100, 'BTN': 100, 'SB': 99.5, 'BB': 99
+        };
+        
+        this.db = null;
+        this.editMode = false;
+        this.currentTool = 'raise'; // Default tool
+        this.isPainting = false;
+        
+        // Initial State
+        this.resetTree();
+    }
+
+    resetTree() {
+        this.actions = {}; // Map of Pos -> Action (e.g., UTG: 'Raise 2.5')
+        this.currentPosIndex = 0; // UTG starts
+        this.heroPos = null; // Who are we viewing?
+    }
+
+    async init() {
+        this.renderTreeControls();
+        this.updateView();
+        
+        // Load Database
+        await this.loadDatabase();
+    }
+
+    async loadDatabase() {
+        try {
+            const sqlPromise = window.initSqlJs({
+                locateFile: file => `lib/${file}`
+            });
+            const dataPromise = fetch('data/gto.db').then(res => res.arrayBuffer());
+            
+            const [SQL, buf] = await Promise.all([sqlPromise, dataPromise]);
+            this.db = new SQL.Database(new Uint8Array(buf));
+            
+            console.log("Database loaded successfully");
+            this.updateView(); // Refresh with DB data
+            
+        } catch (e) {
+            console.error("Failed to load DB", e);
+            alert("Could not load GTO database. Check console.");
+        }
+    }
+
+    toggleEditMode() {
+        this.editMode = !this.editMode;
+        const btn = document.getElementById('edit-mode-btn');
+        const palette = document.getElementById('paint-palette');
+        
+        if (btn) {
+            btn.classList.toggle('text-yellow-400', this.editMode);
+            btn.classList.toggle('text-gray-400', !this.editMode);
+        }
+        
+        if (palette) {
+            palette.classList.toggle('hidden', !this.editMode);
+        }
+        
+        this.updateView();
+    }
+    
+    setTool(tool) {
+        this.currentTool = tool;
+        // Update UI
+        const tools = document.querySelectorAll('.palette-tool');
+        tools.forEach(t => {
+            const isSelected = t.dataset.tool === tool;
+            if (isSelected) {
+                t.classList.add('ring-2', 'ring-white', 'opacity-100');
+                t.classList.remove('opacity-50');
+            } else {
+                t.classList.remove('ring-2', 'ring-white', 'opacity-100');
+                t.classList.add('opacity-50');
+            }
+        });
+    }
+
+    // --- Data Retrieval ---
+    getStrategyForCurrentState() {
+        if (!this.db) return {}; 
+        
+        const activePos = this.positions[this.currentPosIndex];
+        const context = this.deriveContext();
+        
+        // Build Base Query with context filters
+        let query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain AND prev_action = :prev";
+        let params = {
+            ':hero': activePos,
+            ':villain': context.villainPos,
+            ':prev': context.prevAction
+        };
+
+        // RFI overrides
+        if (context.isRFI) {
+             query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
+        }
+        
+        // Add Game Config Filters (Optional: strict matching)
+        // Ideally we filter by table_size too, but let's be loose for now unless exact match needed
+        // query += " AND table_size = :size AND stack_depth = :stack";
+        // params[':size'] = this.config.tableSize;
+        // params[':stack'] = this.config.stackDepth;
+
+        const stmt = this.db.prepare(query);
+        stmt.bind(params);
+        
+        let scenarioId = null;
+        if (stmt.step()) {
+            const row = stmt.getAsObject();
+            scenarioId = row.id;
+        }
+        stmt.free();
+
+        if (scenarioId) {
+            const stratStmt = this.db.prepare("SELECT hand, frequencies FROM strategies WHERE scenario_id = :id");
+            stratStmt.bind({ ':id': scenarioId });
+            
+            const strategy = {};
+            while(stratStmt.step()) {
+                const row = stratStmt.getAsObject();
+                strategy[row.hand] = JSON.parse(row.frequencies);
+            }
+            stratStmt.free();
+            return strategy;
+        } else {
+            return {};
+        }
+    }
+
+    deriveContext() {
+        const history = this.getActionHistory();
+        
+        // RFI Check: No raises before me
+        const lastAggressor = history.slice().reverse().find(a => a.action.includes('Raise') || a.action.includes('Allin'));
+        
+        if (!lastAggressor) {
+            return { isRFI: true, villainPos: 'Blinds', prevAction: 'Fold' };
+        } else {
+            // Vs Open
+            return { 
+                isRFI: false, 
+                villainPos: lastAggressor.pos, 
+                prevAction: lastAggressor.action 
+            };
+        }
+    }
+
+    // --- Edit Logic ---
+    applyToolStrategy() {
+        switch(this.currentTool) {
+            case 'raise': return { raise: 1.0 };
+            case 'call': return { call: 1.0 };
+            case 'fold': return { fold: 1.0 };
+            case 'allin': return { raise_all_in: 1.0 };
+            case 'mix_raise_call': return { raise: 0.5, call: 0.5 };
+            case 'mix_fold_raise': return { fold: 0.5, raise: 0.5 };
+            case 'mix_fold_call': return { fold: 0.5, call: 0.5 };
+            default: return { fold: 1.0 };
+        }
+    }
+
+    updateHandStrategy(hand) {
+        if (!this.editMode || !this.db) return;
+
+        // Current Context
+        const activePos = this.positions[this.currentPosIndex];
+        const context = this.deriveContext();
+        
+        // Ensure Scenario Exists (Create if not)
+        let scenarioId = this.getOrCreateScenarioId(activePos, context);
+        
+        // Use Tool Strategy
+        const newStrat = this.applyToolStrategy();
+        
+        // Update DB
+        this.db.run(`INSERT OR REPLACE INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)`, 
+                    [scenarioId, hand, JSON.stringify(newStrat)]);
+        
+        // Mark unsaved
+        this.hasUnsavedChanges = true;
+        this.updateSaveButtonState();
+        
+        // Force refresh UI
+        this.updateView();
+        
+        // Trigger Save immediately (Debounced)
+        this.debouncedSave();
+    }
+    
+    // Add debounce helper in constructor or class property
+    debouncedSave() {
+        if (this.saveTimeout) clearTimeout(this.saveTimeout);
+        this.hasUnsavedChanges = true;
+        this.updateSaveButtonState();
+        
+        this.saveTimeout = setTimeout(() => {
+            this.saveDatabase();
+        }, 1000); // Save 1 second after last edit
+    }
+    
+    updateSaveButtonState() {
+        const btn = document.getElementById('save-db-btn');
+        if (btn && this.hasUnsavedChanges) {
+            btn.classList.add('text-red-500', 'animate-pulse');
+            btn.title = "Unsaved Changes! Click to Download.";
+        } else if (btn) {
+            btn.classList.remove('text-red-500', 'animate-pulse');
+            btn.title = "Save Database";
+        }
+    }
+    
+    getOrCreateScenarioId(hero, ctx) {
+        // Try find
+        let stmt;
+        let query, params;
+        
+        if (ctx.isRFI) {
+            query = "SELECT id FROM scenarios WHERE hero_pos = ? AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
+            params = [hero];
+        } else {
+            query = "SELECT id FROM scenarios WHERE hero_pos = ? AND villain_pos = ? AND prev_action = ?";
+            params = [hero, ctx.villainPos, ctx.prevAction];
+        }
+        
+        const res = this.db.exec(query, params);
+        if (res.length > 0 && res[0].values.length > 0) {
+             return res[0].values[0][0];
+        }
+        
+        // Create
+        const name = `${hero} vs ${ctx.villainPos || 'Blinds'} (${ctx.prevAction})`;
+        this.db.run("INSERT INTO scenarios (name, hero_pos, villain_pos, prev_action, pot_type) VALUES (?, ?, ?, ?, ?)",
+                    [name, hero, ctx.villainPos || 'Blinds', ctx.prevAction, 'SRP']);
+        
+        // Return new ID
+        const lastIdRes = this.db.exec("SELECT last_insert_rowid()");
+        return lastIdRes[0].values[0][0];
+    }
+    
+    getHandStrat(scenarioId, hand) {
+        const res = this.db.exec("SELECT frequencies FROM strategies WHERE scenario_id = ? AND hand = ?", [scenarioId, hand]);
+        if (res.length > 0 && res[0].values.length > 0) {
+            return JSON.parse(res[0].values[0][0]);
+        }
+        return { fold: 1.0 }; // Default
+    }
+    
+    applyToolStrategy() {
+        switch(this.currentTool) {
+            case 'raise': return { raise: 1.0 };
+            case 'call': return { call: 1.0 };
+            case 'fold': return { fold: 1.0 };
+            case 'allin': return { raise_all_in: 1.0 };
+            case 'mix_raise_call': return { raise: 0.5, call: 0.5 };
+            case 'mix_fold_raise': return { fold: 0.5, raise: 0.5 };
+            case 'mix_fold_call': return { fold: 0.5, call: 0.5 };
+            default: return { fold: 1.0 };
+        }
+    }
+
+    async saveDatabase() {
+        if (!this.db) return;
+        const data = this.db.export();
+        const blob = new Blob([data], { type: 'application/x-sqlite3' });
+        
+        try {
+            const btn = document.getElementById('save-db-btn');
+            if (btn) btn.textContent = '⏳'; // Saving state
+            
+            const response = await fetch('/save-db', {
+                method: 'POST',
+                body: blob,
+                headers: {
+                    'Content-Type': 'application/x-sqlite3'
+                }
+            });
+
+            if (response.ok) {
+                console.log("Database auto-saved to server");
+                this.hasUnsavedChanges = false;
+                this.updateSaveButtonState();
+                if (btn) {
+                    btn.textContent = '✅'; 
+                    setTimeout(() => btn.textContent = '💾', 1000);
+                }
+            } else {
+                throw new Error("Server rejected save");
+            }
+        } catch (e) {
+            console.error("Auto-save failed:", e);
+            // Fallback to download if server fails
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'gto.db';
+            a.click();
+            alert("Server save failed. Downloading file instead.");
+        }
+    }
+
+    // --- Tree Navigation (Same as before) ---
+    getActionHistory() {
+        return this.positions
+            .slice(0, this.currentPosIndex)
+            .map(p => ({ pos: p, action: this.actions[p] || 'Fold' }))
+            .filter(a => a.action !== 'Fold');
+    }
+
+    handleAction(pos, action) {
+        this.actions[pos] = action;
+        if (this.currentPosIndex < this.positions.length - 1) {
+            this.currentPosIndex++;
+        }
+        this.updateView();
+    }
+
+    resetTo(posIndex) {
+        for (let i = posIndex; i < this.positions.length; i++) {
+            delete this.actions[this.positions[i]];
+        }
+        this.currentPosIndex = posIndex;
+        this.updateView();
+    }
+
+    // --- Rendering ---
+    renderTreeControls() {
+        const container = document.getElementById('tree-controls');
+        if (!container) return;
+
+        // Render columns for each position
+        container.innerHTML = this.positions.map((pos, index) => {
+            const isActive = index === this.currentPosIndex;
+            const action = this.actions[pos];
+            const stack = this.stacks[pos];
+            
+            let content = '';
+            
+            if (isActive) {
+                // Active Step
+                content = `
+                    <div class="space-y-1 relative z-10">
+                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-gray-400 border border-transparent hover:border-gray-500 transition-colors" onclick="treeManager.handleAction('${pos}', 'Fold')">Fold</button>
+                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-green-400 font-bold border border-transparent hover:border-green-500 transition-colors" onclick="treeManager.handleAction('${pos}', 'Call')">Call</button>
+                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction('${pos}', 'Raise 2.5')">Raise 2.5</button>
+                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction('${pos}', 'Allin 100')">Allin</button>
+                    </div>
+                `;
+            } else if (action) {
+                // Completed Step
+                let colorClass = 'text-gray-400'; // Fold
+                if (action.includes('Raise')) colorClass = 'text-red-400';
+                if (action.includes('Call')) colorClass = 'text-green-400';
+                if (action.includes('Allin')) colorClass = 'text-red-600';
+                
+                content = `<div class="text-sm font-bold ${colorClass} mt-2">${action}</div>`;
+            } else {
+                content = `<div class="text-xs text-gray-600 mt-2">Waiting...</div>`;
+            }
+
+            return `
+                <div class="flex-1 min-w-[80px] bg-gray-800 border ${isActive ? 'border-primary ring-1 ring-primary' : 'border-gray-700'} rounded p-2 flex flex-col gap-1 ${isActive ? '' : 'cursor-pointer'}" onclick="${isActive ? '' : `treeManager.resetTo(${index})`}">
+                    <div class="flex justify-between items-center border-b border-gray-700 pb-1">
+                        <span class="font-bold text-sm text-gray-200">${pos}</span>
+                        <span class="text-xs text-gray-500">${stack}bb</span>
+                    </div>
+                    ${content}
+                </div>
+            `;
+        }).join('');
+    }
+
+    updateView() {
+        this.renderTreeControls();
+
+        const activePos = this.positions[this.currentPosIndex];
+        const strategy = this.getStrategyForCurrentState();
+        
+        // Render Grid with click handler routing
+        this.renderer.renderGrid('gto-grid-container', strategy, (hand) => {
+            if (this.editMode) {
+                this.updateHandStrategy(hand);
+            } else {
+                this.selectHand(hand, strategy);
+            }
+        });
+
+        // Update Titles
+        const titleEl = document.getElementById('current-scenario-title');
+        if (titleEl) {
+            const history = this.getActionHistory().map(a => `${a.pos} ${a.action}`).join(', ');
+            titleEl.innerHTML = `
+                <span class="text-primary">${activePos}</span> Decision 
+                <span class="text-xs font-normal text-gray-500 block">${history || 'RFI Strategy'}</span>
+                ${this.editMode ? '<span class="text-yellow-400 text-xs font-bold">[EDIT MODE] Click hands to cycle</span>' : ''}
+            `;
+        }
+    }
+
+    selectHand(hand, strategy) {
+        const data = strategy[hand];
+        const infoPanel = document.getElementById('hand-info-content');
+        if (infoPanel) {
+            infoPanel.innerHTML = `
+                <h3 class="text-xl font-bold mb-2">${hand}</h3>
+                <div class="space-y-2">
+                    ${this.formatFrequencies(data)}
+                </div>
+            `;
+        }
+        
+        if (document.getElementById('auto-analyze')?.checked) {
+             const context = {
+                scenarioName: this.getActionHistory().map(a => a.pos).join('_') + `_to_${this.positions[this.currentPosIndex]}`,
+                heroPos: this.positions[this.currentPosIndex],
+                hand: hand,
+                strategy: data
+            };
+            this.llm.analyze(context).then(res => {
+                const out = document.getElementById('coach-response');
+                if(out) out.innerHTML = res.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+            });
+        }
+    }
+
+    formatFrequencies(freqs) {
+        if (!freqs) return 'Fold 100%';
+        const colors = this.renderer.colors;
+        return Object.entries(freqs)
+            .sort(([,a], [,b]) => b - a)
+            .map(([action, val]) => `
+                <div class="flex justify-between text-sm">
+                    <span class="capitalize text-gray-300">${action.replace('_', ' ')}</span>
+                    <span class="font-mono font-bold">${(val * 100).toFixed(1)}%</span>
+                </div>
+                <div class="w-full bg-gray-700 h-2 rounded mt-1">
+                    <div class="h-full rounded" style="width: ${val * 100}%; background-color: ${colors[action] || '#fff'}"></div>
+                </div>
+            `).join('');
+    }
+}
+
+// Global instance
+let treeManager;
+
+document.addEventListener('DOMContentLoaded', () => {
+    const renderer = new GTORenderer();
+    const llm = new LLMService();
+    
+    treeManager = new GTOTreeManager(renderer, llm);
+    treeManager.init();
+    
+    // Bind Edit/Save buttons if they exist
+    const editBtn = document.getElementById('edit-mode-btn');
+    if (editBtn) editBtn.addEventListener('click', () => treeManager.toggleEditMode());
+    
+    const saveBtn = document.getElementById('save-db-btn');
+    if (saveBtn) saveBtn.addEventListener('click', () => treeManager.saveDatabase());
+
+    // Bind Paint Palette Tools
+    const tools = document.querySelectorAll('.palette-tool');
+    tools.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const tool = e.target.dataset.tool;
+            treeManager.setTool(tool);
+        });
+    });
+});
