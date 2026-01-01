@@ -7,12 +7,14 @@ class GTORenderer {
     constructor() {
         // Define colors for actions matching GTO Wizard style
         this.colors = {
-            'fold': '#3e4956',      // Dark Grey (Fold)
+            'fold': '#4772b8',      // GTO Wizard Blue-ish Fold
             'call': '#2c9f45',      // Green (Call)
             'raise': '#b93c3c',     // Red (Raise)
             'raise_small': '#b93c3c', // Red (Small Raise)
             'raise_big': '#8a2323', // Darker Red (Big Raise/3bet)
-            'all_in': '#6d1b1b'     // Deep Red (All-in)
+            'all_in': '#6d1b1b',     // Deep Red (All-in)
+            'raise_all_in': '#6d1b1b', // Ensure tree-manager key matches
+            'out_of_range': '#000000' // Pure Black
         };
     }
 
@@ -25,7 +27,7 @@ class GTORenderer {
 
         // Sort actions by priority for consistent stacking
         // Standard GTO Wiz stacking: Fold (bottom), Call, Raise (top)
-        const priority = ['fold', 'call', 'raise', 'raise_small', 'raise_big', 'all_in'];
+        const priority = ['out_of_range', 'fold', 'call', 'raise', 'raise_small', 'raise_big', 'all_in', 'raise_all_in'];
         
         const entries = Object.entries(freqs)
             .filter(([, pct]) => pct > 0.001) // Ignore < 0.1%
@@ -52,7 +54,7 @@ class GTORenderer {
         return `linear-gradient(to top, ${gradientStops.join(', ')})`;
     }
 
-    renderGrid(containerId, strategyData, onHandClick) {
+    renderGrid(containerId, strategyData, onHandClick, isSubsetRange = false) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
@@ -71,7 +73,7 @@ class GTORenderer {
         container.innerHTML = html;
 
         // Apply styles and events after rendering
-        this.updateGrid(strategyData);
+        this.updateGrid(strategyData, isSubsetRange);
 
         // Bind events
         const cells = container.querySelectorAll('.gto-cell');
@@ -85,7 +87,7 @@ class GTORenderer {
         });
     }
 
-    updateGrid(strategyData) {
+    updateGrid(strategyData, isSubsetRange = false) {
         if (!strategyData) return;
 
         const cells = document.querySelectorAll('.gto-cell');
@@ -96,13 +98,22 @@ class GTORenderer {
             if (strategy) {
                 cell.style.background = this.getBackgroundStyle(strategy);
                 cell.innerHTML = `<span class="hand-label">${hand}</span>`;
-                
-                // Optional: Add frequency text for the dominant action?
-                // For now just the hand name is cleaner
+                cell.classList.remove('opacity-25', 'grayscale');
             } else {
-                // Default to 100% Fold if not found
-                cell.style.background = this.colors['fold'];
-                cell.innerHTML = `<span class="hand-label">${hand}</span>`;
+                if (isSubsetRange) {
+                    // Out of Range (Previously folded)
+                    cell.style.background = this.colors['out_of_range'];
+                    cell.classList.add('grayscale');
+                    cell.classList.remove('opacity-25'); // Remove opacity to avoid blue background bleed
+                    cell.style.opacity = '1'; 
+                    cell.innerHTML = `<span class="hand-label" style="opacity: 0.3">${hand}</span>`; // Dim text instead
+                } else {
+                    // First action (Open/RFI) -> Missing means Fold 100%
+                    cell.style.background = this.colors['fold'];
+                    cell.innerHTML = `<span class="hand-label">${hand}</span>`;
+                    cell.classList.remove('opacity-25', 'grayscale');
+                    cell.style.opacity = '1';
+                }
             }
         });
     }
@@ -115,4 +126,3 @@ class GTORenderer {
         return `${r2}${r1}o`; // Offsuit
     }
 }
-
