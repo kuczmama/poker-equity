@@ -105,6 +105,157 @@ class GTOTreeManager {
         return this.getStrategyForContext(activePos, context.villainPos, context.prevAction, context.isRFI);
     }
 
+    /**
+     * Fuzzy search for the closest GTO strategy based on action amount.
+     * Searches database for closest matching bet size for this specific spot.
+     */
+    findClosestStrategy(heroPos, villainPos, actionAmountBB) {
+        if (!this.db) return {};
+
+        // 1. Get all scenarios for this position matchup
+        // We only care about scenarios where we face a raise (prev_action like 'Raise %')
+        const query = "SELECT id, prev_action FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain";
+        const stmt = this.db.prepare(query);
+        stmt.bind({ ':hero': heroPos, ':villain': villainPos });
+
+        let bestScenarioId = null;
+        let minDiff = Infinity;
+        let bestMatchAction = "";
+
+        while (stmt.step()) {
+            const row = stmt.getAsObject();
+            
+            // Extract numeric amount from "Raise 2.5", "Raise 9", etc.
+            const match = row.prev_action.match(/Raise\s+([\d\.]+)/i);
+            if (match) {
+                const dbAmount = parseFloat(match[1]);
+                const diff = Math.abs(dbAmount - actionAmountBB);
+                
+                // Find the scenario with the smallest difference in bet size
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    bestScenarioId = row.id;
+                    bestMatchAction = row.prev_action;
+                }
+            }
+        }
+        stmt.free();
+
+        if (bestScenarioId) {
+            console.log(`Fuzzy Match: Input ${actionAmountBB.toFixed(1)}bb -> Matched "${bestMatchAction}" (Diff: ${minDiff.toFixed(2)})`);
+            return this.getStrategyByScenarioId(bestScenarioId);
+        }
+
+        return {};
+    }
+
+    /**
+     * Retrieve Strategy content by ID
+     */
+    getStrategyByScenarioId(scenarioId) {
+        const stratStmt = this.db.prepare("SELECT hand, frequencies FROM strategies WHERE scenario_id = :id");
+        stratStmt.bind({ ':id': scenarioId });
+        
+        const strategy = {};
+        while(stratStmt.step()) {
+            const row = stratStmt.getAsObject();
+            strategy[row.hand] = JSON.parse(row.frequencies);
+        }
+        stratStmt.free();
+        return strategy;
+    }
+
+    /**
+     * Estimate Equity for Hero vs Villain using DB Ranges
+     * Fetches Villain's Opening Range from the DB itself.
+     */
+    async estimateEquity(heroHandStr, villainPos) {
+        if (!this.db) return null;
+
+        // 1. Fetch Villain's RFI Range from DB
+        // Query: What does 'villainPos' do when they are first to act (vs Blinds/Fold)?
+        // This assumes standard RFI scenarios are stored as Villain vs Blinds (Fold)
+        let query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND prev_action = 'Fold'";
+        let params = { ':hero': villainPos };
+        
+        // If no simple RFI found, try to find *any* scenario where they act first
+        // But 'Fold' is the standard 'prev_action' for RFI in your app logic.
+        
+        const stmt = this.db.prepare(query);
+        stmt.bind(params);
+        
+        let villainScenarioId = null;
+        if (stmt.step()) {
+            villainScenarioId = stmt.getAsObject().id;
+        }
+        stmt.free();
+
+        let villainRangeHands = [];
+
+        if (villainScenarioId) {
+            const strategy = this.getStrategyByScenarioId(villainScenarioId);
+            
+            // Build range: Any hand they Raise/All-in with > 5% frequency
+            villainRangeHands = Object.keys(strategy).filter(hand => {
+                const freqs = strategy[hand];
+                if (!freqs) return false;
+                const raiseFreq = (freqs.raise || 0) + (freqs.raise_all_in || 0);
+                return raiseFreq > 0.05; // 5% cutoff to filter noise
+            });
+        }
+
+        if (villainRangeHands.length === 0) {
+            console.warn(`Could not find RFI range for ${villainPos} in DB.`);
+            return null;
+        }
+
+        // 2. Calculate Equity
+        // We pass the list of hands as a comma-separated string to the calculator
+        const rangeStr = villainRangeHands.join(',');
+        
+        try {
+            // Async wrapper for calculation to not freeze UI
+            const result = await new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    try {
+                        // 2000 iterations is a fast estimate
+                        const res = OddsCalculator.calculateRangeEquity(heroHandStr, rangeStr, '', 2000);
+                        resolve(res);
+                    } catch (err) {
+                        reject(err);
+                    }
+                }, 10);
+            });
+            return result.range1Equity;
+        } catch (e) {
+            console.error("Equity Calc Failed:", e);
+            return null;
+        }
+    }
+
+    normalizeHand(handStr) {
+        if (!handStr) return '';
+        try {
+            // Use PokerHand from poker-logic.js if available
+            if (typeof PokerHand !== 'undefined') {
+                const h = new PokerHand(handStr);
+                // Convert 4s4c -> 44, AsKh -> AKo, AsKs -> AKs
+                if (h.paired) {
+                    const rank = h.getCardName(h.highCard);
+                    return rank + rank;
+                } else {
+                    const r1 = h.getCardName(h.highCard);
+                    const r2 = h.getCardName(h.lowCard);
+                    return r1 + r2 + (h.suited ? 's' : 'o');
+                }
+            }
+            return handStr;
+        } catch (e) {
+            console.warn("Hand normalization failed", e);
+            return handStr;
+        }
+    }
+
     getStrategyForContext(heroPos, villainPos, prevAction, isRFI) {
         if (!this.db) return {};
 
@@ -133,16 +284,7 @@ class GTOTreeManager {
         stmt.free();
 
         if (scenarioId) {
-            const stratStmt = this.db.prepare("SELECT hand, frequencies FROM strategies WHERE scenario_id = :id");
-            stratStmt.bind({ ':id': scenarioId });
-            
-            const strategy = {};
-            while(stratStmt.step()) {
-                const row = stratStmt.getAsObject();
-                strategy[row.hand] = JSON.parse(row.frequencies);
-            }
-            stratStmt.free();
-            return strategy;
+            return this.getStrategyByScenarioId(scenarioId);
         } else {
             return {};
         }

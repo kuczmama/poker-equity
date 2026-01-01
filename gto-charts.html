@@ -216,6 +216,7 @@
 
     <!-- Scripts -->
     <script src="lib/sql-wasm.js"></script>
+    <script src="pokersolver.js"></script>
     <script src="poker-logic.js"></script> <!-- Ensure PokerLogic/OddsCalculator is available if needed -->
     <script src="hand-parser.js"></script>
     <script src="llm-service.js"></script>
@@ -297,74 +298,112 @@
                     const handData = parser.parse(text);
                     if (!handData.hero) throw new Error("Could not identify Hero in hand history.");
 
-                    // 2. Derive Context from handData
-                    
-                    let actions = handData.preflopActions;
-                    let lastAggressor = null;
-                    let lastRaiseAmount = 0;
-                    
-                    // Filter actions to ignore LIMPS and COLD CALLS by villains
-                    // We only care about RAISES to define the GTO Context
-                    for (let act of actions) {
-                        if (act.player === handData.hero.name) {
-                            break; 
-                        }
-                        if (act.type === 'raise') {
-                            lastAggressor = act;
-                            lastRaiseAmount = act.amount;
-                        }
-                        // Explicitly ignore 'call' (limp/cold call)
+                    // 1b. Determine Blinds Size (to convert $ to BB)
+                    let bbSize = 0.05; // Default fallback
+                    // Look for "posts big blind 0.05" line
+                    const bbAction = handData.preflopActions.find(a => a.type === 'post' && a.raw.includes('big blind'));
+                    if (bbAction) {
+                        bbSize = bbAction.amount;
                     }
+
+                    // 2. Derive Context & Calculate Pot Odds
+                    let currentPot = 0;
                     
                     let villainPos = 'Blinds';
-                    let prevAction = 'Fold';
                     let isRFI = true;
+                    let lastRaiseAmount = 0; // In currency
+                    
+                    // Simple tracking of player investments to calc Pot Odds
+                    const playersInvested = {}; 
 
-                    if (lastAggressor) {
-                        // Find position of aggressor
-                        const villainObj = handData.players.find(p => p.name === lastAggressor.player);
-                        if (villainObj) {
-                            villainPos = villainObj.pos;
-                            prevAction = `Raise ${lastAggressor.amount}`; 
-                            isRFI = false;
+                    for (const act of handData.preflopActions) {
+                        // Stop before Hero's decision (if analyzing Hero's action)
+                        if (act.player === handData.hero.name && act.type !== 'post') {
+                            break;
                         }
-                    } else {
-                        // No raise found. Check if Hero is BB.
-                        // If Hero is BB and no raise, it implies Limps or Fold to BB.
-                        // If Limps, user said "calling/limping not supported".
-                        // We will treat Facing Limp as RFI (or Facing Min Raise?)
-                        // User said: "same for limping we can't support limps... put the closest range"
-                        // Closest to facing limp is usually RFI (checking option) or ISO Raise.
-                        // Let's stick to RFI logic for now, effectively ignoring the limpers.
-                        isRFI = true; 
+
+                        // Track Pot Size
+                        // act.amount logic:
+                        // "raises to X" -> X is total
+                        // "calls X" -> X is added amount (in CoinPoker format usually)
+                        // "posts X" -> X is added
+                        // "posts ante X" -> X is added (dead)
+
+                        let isDead = act.type === 'post' && act.raw.includes('ante');
+                        let addedToPot = 0;
+                        
+                        if (isDead) {
+                            currentPot += act.amount;
+                            // Antes don't count towards 'playersInvested' for call matching usually
+                        } else {
+                            const prevInvested = playersInvested[act.player] || 0;
+                            let newTotal = 0;
+
+                            if (act.type === 'raise') {
+                                // "raises to X"
+                                newTotal = act.amount;
+                                addedToPot = newTotal - prevInvested;
+                            } else {
+                                // "calls X" or "posts X" (blind) -> X is added amount
+                                addedToPot = act.amount;
+                                newTotal = prevInvested + addedToPot;
+                            }
+                            
+                            playersInvested[act.player] = newTotal;
+                            currentPot += addedToPot;
+
+                            if (act.type === 'raise') {
+                                const villainObj = handData.players.find(p => p.name === act.player);
+                                if (villainObj) {
+                                    villainPos = villainObj.pos;
+                                    isRFI = false;
+                                    lastRaiseAmount = newTotal; // Currency
+                                }
+                            }
+                        }
                     }
 
-                    // Attempt to fuzzy match the 'prevAction' to what we have in DB
-                    // e.g. "Raise 0.15" (3bb) -> "Raise 3" or "Raise 2.5"
-                    // For now, we'll try exact, then fallback? 
-                    // Actually, let's just use the raw extracted pos and pass to LLM.
-                    // The LLM needs the GTO strategy. We try to fetch it.
-                    
-                    // TODO: Improve mapping of "0.15" -> "Raise 3"
-                    // For now, just try to find a scenario that matches Position
-                    
-                    // We can try to fetch strategy for "Raise 2.5" or "Raise 3" if we see a raise
+                    // Calculate Pot Odds
+                    // Hero needs to call (lastRaiseAmount - heroInvested)
+                    let potOdds = null;
+                    if (lastRaiseAmount > 0) {
+                         const heroInvested = playersInvested[handData.hero.name] || 0;
+                         const callCost = lastRaiseAmount - heroInvested;
+                         
+                         if (callCost > 0) {
+                             // Odds = Call / (Pot_Before_Call + Call)
+                             potOdds = (callCost / (currentPot + callCost)) * 100;
+                         }
+                    }
+
+                    // 3. Get GTO Strategy (Fuzzy Match)
                     let strategy = {};
-                    if (!isRFI) {
-                        // Try common sizes
-                        strategy = treeManager.getStrategyForContext(handData.hero.pos, villainPos, 'Raise 2.5', false);
-                        if (Object.keys(strategy).length === 0) {
-                             strategy = treeManager.getStrategyForContext(handData.hero.pos, villainPos, 'Raise 3', false);
-                        }
-                    } else {
-                        // RFI
+                    if (isRFI) {
+                        // RFI: Hero vs Blinds (Fold)
                         strategy = treeManager.getStrategyForContext(handData.hero.pos, 'Blinds', 'Fold', true);
+                    } else {
+                        // Vs Raise: Fuzzy match the BB amount
+                        const raiseBB = lastRaiseAmount / bbSize;
+                        // Use the new fuzzy search method
+                        strategy = treeManager.findClosestStrategy(handData.hero.pos, villainPos, raiseBB);
                     }
 
-                    // 3. Send to LLM
+                    // Normalize hand for DB lookup
+                    const canonicalHand = treeManager.normalizeHand(handData.hero.handStr);
+
+                    // 4. Estimate Equity (Database Driven)
+                    console.log('Starting Equity Calculation...');
+                    analyzeBtn.textContent = 'Calc Equity...';
+                    let equity = null;
+                    if (!isRFI) {
+                        // Calculate equity against Villain's DB range
+                        equity = await treeManager.estimateEquity(handData.hero.handStr, villainPos);
+                    }
+                    console.log('Equity Calculation Done:', equity);
+
+                    // 5. Send to LLM
                     analyzeBtn.textContent = 'Analyzing...';
                     
-                    // Switch to chat view to show result
                     tabChat.click();
                     coachResponse.innerHTML = '<p class="animate-pulse text-gray-400">Analyzing hand history...</p>';
 
@@ -374,9 +413,9 @@
                         heroHand: handData.hero.handStr,
                         villainPos: villainPos,
                         actionType: 'Preflop Decision', // Generic for now
-                        potOdds: null, // TODO: Calc from pot size
-                        equity: null, // TODO: Calc
-                        gtoStrategy: (Object.keys(strategy).length > 0) ? (strategy[handData.hero.handStr] || { fold: 1 }) : null,
+                        potOdds: potOdds,
+                        equity: equity,
+                        gtoStrategy: (Object.keys(strategy).length > 0) ? (strategy[canonicalHand] || { fold: 1 }) : null,
                         rawHistory: text
                     });
 
