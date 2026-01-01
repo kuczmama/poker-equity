@@ -417,8 +417,26 @@ class GTOTreeManager {
         if (!container) return;
 
         // Render columns for each position
-        container.innerHTML = this.positions.map((pos, index) => {
-            const isActive = index === this.currentPosIndex;
+        // Filter out BB if no raise has occurred yet (RFI phase)
+        const history = this.getActionHistory();
+        const hasRaise = history.some(a => a.action.includes('Raise') || a.action.includes('Allin'));
+        
+        let visiblePositions = this.positions;
+        if (!hasRaise) {
+             visiblePositions = this.positions.filter(p => p !== 'BB');
+        }
+
+        container.innerHTML = visiblePositions.map((pos, index) => {
+            // Adjust index to match visible positions if needed, but currentPosIndex tracks logic index
+            // We need to map visual index to logical index if we hide elements?
+            // Actually, we just hide the BB if it's the last one and no one raised.
+            // But wait, the loop runs on visiblePositions.
+            // If we filter, we might lose the connection to 'index' being the position index in this.positions.
+            
+            // Better: Loop all, return empty if hidden.
+            if (pos === 'BB' && !hasRaise) return '';
+
+            const isActive = this.positions.indexOf(pos) === this.currentPosIndex;
             const action = this.actions[pos];
             const stack = this.stacks[pos];
             
@@ -487,7 +505,7 @@ class GTOTreeManager {
             }
 
             return `
-                <div class="flex-1 min-w-[80px] bg-gray-800 border ${isActive ? 'border-primary ring-1 ring-primary' : 'border-gray-700'} rounded p-2 flex flex-col gap-1 ${isActive ? '' : 'cursor-pointer'}" onclick="${isActive ? '' : `treeManager.resetTo(${index})`}">
+                <div class="flex-1 min-w-[80px] bg-gray-800 border ${isActive ? 'border-primary ring-1 ring-primary' : 'border-gray-700'} rounded p-2 flex flex-col gap-1 ${isActive ? '' : 'cursor-pointer'}" onclick="${isActive ? '' : `treeManager.resetTo(${this.positions.indexOf(pos)})`}">
                     <div class="flex justify-between items-center border-b border-gray-700 pb-1">
                         <span class="font-bold text-sm text-gray-200">${pos}</span>
                         <span class="text-xs text-gray-500">${stack}bb</span>
