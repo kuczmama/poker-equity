@@ -1,0 +1,47 @@
+{
+    "history_actions": [
+        {
+            "game": {
+                "active_position": "UTG",
+                "players": [
+                    {"position": "UTG", "is_active": true, "is_folded": false},
+                    {"position": "BTN", "is_active": true, "is_folded": false},
+                    {"position": "BB", "is_active": true, "is_folded": false}
+                ]
+            },
+            "available_actions": [
+                {
+                    "selected": true,
+                    "action": {
+                        "type": "RAISE",
+                        "betsize": "2.500"
+                    }
+                }
+            ],
+            "strategy": {
+                "AA": {"raise": 1.0},
+                "KK": {"raise": 1.0},
+                "72o": {"fold": 1.0}
+            }
+        },
+        {
+            "game": {
+                "active_position": "BTN",
+                "players": []
+            },
+            "available_actions": [
+                {
+                    "selected": true,
+                    "action": {
+                        "type": "CALL",
+                        "betsize": "2.500"
+                    }
+                }
+            ],
+            "strategy": {
+                "JJ": {"call": 1.0}
+            }
+        }
+    ]
+}
+
