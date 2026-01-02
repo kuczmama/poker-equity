@@ -71,9 +71,8 @@
               const fiveCards = [solverCards[i], solverCards[j], solverCards[k], solverCards[l], solverCards[m]];
               const hand = Hand.solve(fiveCards);
               
-              if (!bestHand || hand.rank > bestHand.rank) {
-                bestHand = hand;
-              }
+              // Important: consider tie-breakers within same category (kickers, straight high, etc).
+              if (!bestHand || compareHands(hand, bestHand) > 0) bestHand = hand;
             }
           }
         }
@@ -122,11 +121,12 @@
     
     const counts = Object.values(rankCounts).sort((a, b) => b - a);
     const isFlush = suits.every(suit => suit === suits[0]);
-    const isStraight = isStraightCheck(ranks);
+    const straightHigh = getStraightHighCard(ranks);
+    const isStraight = straightHigh !== null;
     
     // Check for straight flush
     if (isFlush && isStraight) {
-      return new Hand(cards, 'Straight Flush', 8, [ranks[0]]);
+      return new Hand(cards, 'Straight Flush', 8, [straightHigh]);
     }
     
     // Check for four of a kind
@@ -150,7 +150,7 @@
     
     // Check for straight
     if (isStraight) {
-      return new Hand(cards, 'Straight', 4, [ranks[0]]);
+      return new Hand(cards, 'Straight', 4, [straightHigh]);
     }
     
     // Check for three of a kind
@@ -187,20 +187,25 @@
     return new Hand(cards, 'High Card', 0, ranks);
   };
 
-  function isStraightCheck(ranks) {
-    // Check for regular straight
-    for (let i = 0; i < ranks.length - 4; i++) {
-      if (ranks[i] - ranks[i + 4] === 4) {
-        return true;
-      }
+  function getStraightHighCard(ranksDesc) {
+    // Expect 5 ranks, sorted desc (e.g. [14, 13, 12, 11, 10])
+    if (!Array.isArray(ranksDesc) || ranksDesc.length !== 5) return null;
+
+    // Unique ranks required for a straight
+    const unique = [...new Set(ranksDesc)];
+    if (unique.length !== 5) return null;
+
+    // Wheel (A-2-3-4-5) -> treat as 5-high straight
+    if (unique[0] === 14 && unique[1] === 5 && unique[2] === 4 && unique[3] === 3 && unique[4] === 2) {
+      return 5;
     }
-    
-    // Check for A-2-3-4-5 straight
-    if (ranks[0] === 14 && ranks[1] === 5 && ranks[2] === 4 && ranks[3] === 3 && ranks[4] === 2) {
-      return true;
+
+    // Regular straight: high - low === 4 and all consecutive
+    if (unique[0] - unique[4] !== 4) return null;
+    for (let i = 0; i < 4; i++) {
+      if (unique[i] - unique[i + 1] !== 1) return null;
     }
-    
-    return false;
+    return unique[0];
   }
 
   // Export for global use

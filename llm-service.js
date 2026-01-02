@@ -47,6 +47,156 @@ You must strictly adhere to this color-coding system when categorizing players. 
         `;
     }
 
+    static _rankToWord(rank) {
+        switch (rank) {
+            case 14: return 'Ace';
+            case 13: return 'King';
+            case 12: return 'Queen';
+            case 11: return 'Jack';
+            case 10: return 'Ten';
+            case 9: return 'Nine';
+            case 8: return 'Eight';
+            case 7: return 'Seven';
+            case 6: return 'Six';
+            case 5: return 'Five';
+            case 4: return 'Four';
+            case 3: return 'Three';
+            case 2: return 'Two';
+            default: throw new Error(`Invalid rank: ${rank}`);
+        }
+    }
+
+    static _rankCharToValue(ch) {
+        switch (ch) {
+            case 'A': return 14;
+            case 'K': return 13;
+            case 'Q': return 12;
+            case 'J': return 11;
+            case 'T': return 10;
+            case '9': return 9;
+            case '8': return 8;
+            case '7': return 7;
+            case '6': return 6;
+            case '5': return 5;
+            case '4': return 4;
+            case '3': return 3;
+            case '2': return 2;
+            default: throw new Error(`Invalid rank char: ${ch}`);
+        }
+    }
+
+    static _suitCharToWord(ch) {
+        switch (ch) {
+            case 's': return 'spades';
+            case 'h': return 'hearts';
+            case 'd': return 'diamonds';
+            case 'c': return 'clubs';
+            default: throw new Error(`Invalid suit char: ${ch}`);
+        }
+    }
+
+    static _parseCardStr(cardStr) {
+        if (typeof cardStr !== 'string') throw new Error(`Invalid card: ${cardStr}`);
+        const c = cardStr.trim().replace('10', 'T');
+        if (c.length !== 2) throw new Error(`Invalid card format: "${cardStr}"`);
+        const rankChar = c[0].toUpperCase();
+        const suitChar = c[1].toLowerCase();
+        return { rank: this._rankCharToValue(rankChar), suit: suitChar };
+    }
+
+    static _parseHoleCardsFromHandStr(handStr) {
+        if (typeof handStr !== 'string') throw new Error('Hero handStr missing');
+        const cleaned = handStr.replace(/\s+/g, '').replace(/10/g, 'T');
+        if (cleaned.length % 2 !== 0) throw new Error(`Invalid hero handStr: "${handStr}"`);
+        const out = [];
+        for (let i = 0; i < cleaned.length; i += 2) {
+            out.push(this._parseCardStr(cleaned.slice(i, i + 2)));
+        }
+        if (out.length !== 2) {
+            // We only support NLHE for solver-based street evaluation.
+            throw new Error(`Hero hand must be 2 cards (NLHE). Got ${out.length} cards: "${handStr}"`);
+        }
+        return out;
+    }
+
+    static _cardObjToPretty(cardObj) {
+        const r = this._rankToWord(cardObj.rank);
+        const s = this._suitCharToWord(cardObj.suit);
+        return `${r} of ${s}`;
+    }
+
+    static _handToEnglish(bestHand) {
+        if (!bestHand || !bestHand.name || !Array.isArray(bestHand.values)) {
+            throw new Error('Invalid PokerSolver hand object');
+        }
+
+        const v = bestHand.values;
+        const r = (x) => this._rankToWord(x);
+
+        switch (bestHand.name) {
+            case 'Straight Flush':
+                return `Straight flush (${r(v[0])}-high)`;
+            case 'Four of a Kind':
+                return `Four of a kind (${r(v[0])}s), kicker ${r(v[1])}`;
+            case 'Full House':
+                return `Full house (${r(v[0])}s full of ${r(v[1])}s)`;
+            case 'Flush':
+                return `Flush (${r(v[0])}-high)`;
+            case 'Straight':
+                return `Straight (${r(v[0])}-high)`;
+            case 'Three of a Kind':
+                return `Three of a kind (${r(v[0])}s)`;
+            case 'Two Pair':
+                return `Two pair (${r(v[0])}s and ${r(v[1])}s), kicker ${r(v[2])}`;
+            case 'Pair':
+                return `Pair of ${r(v[0])}s`;
+            case 'High Card':
+                return `High card (${r(v[0])}-high)`;
+            default:
+                // Fail fast so we notice if solver changes.
+                throw new Error(`Unknown hand type from solver: "${bestHand.name}"`);
+        }
+    }
+
+    static buildHeroHandByStreetSummary(handData) {
+        if (!handData?.hero?.handStr) throw new Error('Cannot build hero hand summary: missing hero hand');
+        if (handData.variant && handData.variant !== 'NLHE') {
+            throw new Error(`Hero hand-by-street evaluation currently supports NLHE only. Got variant: ${handData.variant}`);
+        }
+        if (!window.PokerSolver?.evaluateHand) throw new Error('PokerSolver not loaded (required for hero hand evaluation)');
+
+        const heroCards = this._parseHoleCardsFromHandStr(handData.hero.handStr);
+        const preflopPretty = heroCards.map(c => this._cardObjToPretty(c)).join(' + ');
+
+        const flop = handData?.streets?.flop?.card || [];
+        const turn = handData?.streets?.turn?.card || [];
+        const river = handData?.streets?.river?.card || [];
+
+        const boardFlop = flop.map(c => this._parseCardStr(c));
+        const boardTurn = [...flop, ...turn].map(c => this._parseCardStr(c));
+        const boardRiver = [...flop, ...turn, ...river].map(c => this._parseCardStr(c));
+
+        const lines = [];
+        lines.push(`- Preflop: ${handData.hero.handStr} (${preflopPretty})`);
+
+        if (boardFlop.length === 3) {
+            const best = PokerSolver.evaluateHand([...heroCards, ...boardFlop]);
+            lines.push(`- Flop [${flop.join(' ')}]: ${this._handToEnglish(best)}`);
+        }
+        if (boardTurn.length === 4) {
+            const boardLabel = [...flop, ...turn].join(' ');
+            const best = PokerSolver.evaluateHand([...heroCards, ...boardTurn]);
+            lines.push(`- Turn [${boardLabel}]: ${this._handToEnglish(best)}`);
+        }
+        if (boardRiver.length === 5) {
+            const boardLabel = [...flop, ...turn, ...river].join(' ');
+            const best = PokerSolver.evaluateHand([...heroCards, ...boardRiver]);
+            lines.push(`- River [${boardLabel}]: ${this._handToEnglish(best)}`);
+        }
+
+        return lines.join('\n');
+    }
+
     setApiKey(key) {
         this.apiKey = key;
         localStorage.setItem('openrouter_api_key', key);
@@ -249,6 +399,7 @@ ${logs}
             buildStreetLog('River', handData.streets.river)
         ].filter(x => x).join('\n');
 
+        const heroHandByStreet = LLMService.buildHeroHandByStreetSummary(handData);
 
         const systemPrompt = `
 You are an expert Poker Analyst and Coach for Micro-Stakes CoinPoker games.
@@ -264,6 +415,7 @@ ${this.FUNDAMENTALS}
     *   Apply the "Strategic Philosophy" (e.g., Fold if Nit raises turn).
 3.  **Final Score:** Give the play a score out of 10.
 4.  **Format:** Use Markdown with bolding for key insights.
+5.  **Critical:** At the start of each street section, restate "Hero has: ..." using the provided computed street hand summary. Do not contradict it.
 
 **Constraints:**
 *   DO NOT calculate equity yourself. Use the provided numbers or general principles.
@@ -276,6 +428,9 @@ ${this.FUNDAMENTALS}
 - Hand: ${handData.hero.handStr}
 - GTO Strategy (Preflop): ${gtoInfo}
 - ${statsStr}
+
+**Hero Hand Strength by Street (Computed / Deterministic):**
+${heroHandByStreet}
 
 **Hand History & Math:**
 ${historyLog}
