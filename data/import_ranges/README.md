@@ -6,6 +6,25 @@ Drop JSON exports into this folder and run:
 python3 scripts/import_ranges.py
 ```
 
+## Optional: fetching GTOWizard spot JSON (slow + safe)
+
+If you want to download spot JSON directly from GTOWizard and save it into this folder (without spamming the API),
+use:
+
+```bash
+export GTOWIZARD_BEARER_TOKEN='YOUR_TOKEN'
+# optional:
+export GTOWIZARD_CLIENT_ID='YOUR_GWCLIENTID'
+
+python3 scripts/fetch_gtowizard_spot_solutions.py \
+  --spots data/import_ranges/gtowizard_spots.example.json \
+  --out-dir data/import_ranges \
+  --min-delay 3.0 --max-delay 7.0
+```
+
+CoinPoker naming: by default the fetch script rewrites **`UTG+2` → `UTG`** in the downloaded JSON (and rewrites
+GTOW 9-max `UTG` → `UTG_9` to avoid collisions), so your imported scenario names match your CoinPoker 7-max positions.
+
 ## Supported JSON formats
 
 ### 1) Solver “full node” export (recommended)

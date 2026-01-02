@@ -1,0 +1,90 @@
+{
+    "spots": [
+        {
+            "output_file": "UTG_RFI.json",
+            "description": "CoinPoker UTG RFI (mapped from GTOWizard UTG+2 RFI).",
+            "params": {
+                "gametype": "Cash9m50zGeneral25Open",
+                "depth": "100",
+                "stacks": "",
+                "preflop_actions": "F-F",
+                "flop_actions": "",
+                "turn_actions": "",
+                "river_actions": "",
+                "board": ""
+            }
+        },
+        {
+            "output_file": "LJ_RFI.json",
+            "description": "CoinPoker LJ RFI (GTOWizard LJ, with UTG/UTG+1/UTG+2 folded).",
+            "params": {
+                "gametype": "Cash9m50zGeneral25Open",
+                "depth": "100",
+                "stacks": "",
+                "preflop_actions": "F-F-F",
+                "flop_actions": "",
+                "turn_actions": "",
+                "river_actions": "",
+                "board": ""
+            }
+        },
+        {
+            "output_file": "HJ_RFI.json",
+            "description": "CoinPoker HJ RFI (GTOWizard HJ).",
+            "params": {
+                "gametype": "Cash9m50zGeneral25Open",
+                "depth": "100",
+                "stacks": "",
+                "preflop_actions": "F-F-F-F",
+                "flop_actions": "",
+                "turn_actions": "",
+                "river_actions": "",
+                "board": ""
+            }
+        },
+        {
+            "output_file": "CO_RFI.json",
+            "description": "CoinPoker CO RFI (GTOWizard CO).",
+            "params": {
+                "gametype": "Cash9m50zGeneral25Open",
+                "depth": "100",
+                "stacks": "",
+                "preflop_actions": "F-F-F-F-F",
+                "flop_actions": "",
+                "turn_actions": "",
+                "river_actions": "",
+                "board": ""
+            }
+        },
+        {
+            "output_file": "BTN_RFI.json",
+            "description": "CoinPoker BTN RFI (GTOWizard BTN).",
+            "params": {
+                "gametype": "Cash9m50zGeneral25Open",
+                "depth": "100",
+                "stacks": "",
+                "preflop_actions": "F-F-F-F-F-F",
+                "flop_actions": "",
+                "turn_actions": "",
+                "river_actions": "",
+                "board": ""
+            }
+        },
+        {
+            "output_file": "SB_RFI.json",
+            "description": "CoinPoker SB RFI (GTOWizard SB, folded to SB).",
+            "params": {
+                "gametype": "Cash9m50zGeneral25Open",
+                "depth": "100",
+                "stacks": "",
+                "preflop_actions": "F-F-F-F-F-F-F",
+                "flop_actions": "",
+                "turn_actions": "",
+                "river_actions": "",
+                "board": ""
+            }
+        }
+    ]
+}
+
+

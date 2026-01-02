@@ -266,11 +266,123 @@ class GTOTreeManager {
         }
         stmt.free();
 
-        if (scenarioId) {
-            return this.getStrategyByScenarioId(scenarioId);
-        } else {
-            return {};
+        if (scenarioId) return this.getStrategyByScenarioId(scenarioId);
+
+        // Fallback: fuzzy match raise sizes (e.g. UI "Raise 9" -> DB "Raise 7.5")
+        const amt = this.parseActionAmount(prevAction);
+        if (!isRFI && amt !== null) {
+            return this.findClosestStrategy(heroPos, villainPos, amt);
         }
+
+        return {};
+    }
+
+    parseActionAmount(actionStr) {
+        if (!actionStr) return null;
+        const match = String(actionStr).match(/(?:Raise|Allin)\s+([\d\.]+)/i);
+        if (!match) return null;
+        const n = parseFloat(match[1]);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    hasAnyActionInStrategy(strategy, actionKey, minFreq = 0.01) {
+        if (!strategy) return false;
+        for (const freqs of Object.values(strategy)) {
+            if (!freqs) continue;
+            if ((freqs[actionKey] || 0) > minFreq) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Return candidate "Raise X" actions available in DB for (hero_pos, villain_pos).
+     */
+    getRaiseActionsFromDB(heroPos, villainPos) {
+        if (!this.db) return [];
+        const query = `
+            SELECT prev_action
+            FROM scenarios
+            WHERE hero_pos = :hero
+              AND villain_pos = :villain
+              AND prev_action LIKE 'Raise %'
+        `;
+        const stmt = this.db.prepare(query);
+        stmt.bind({ ':hero': heroPos, ':villain': villainPos });
+
+        const actions = [];
+        while (stmt.step()) {
+            const row = stmt.getAsObject();
+            if (row.prev_action) actions.push(String(row.prev_action));
+        }
+        stmt.free();
+
+        // Deduplicate
+        return Array.from(new Set(actions));
+    }
+
+    getNextPosInOrbit(pos) {
+        const i = this.positions.indexOf(pos);
+        if (i === -1) return null;
+        if (i + 1 >= this.positions.length) return null;
+        return this.positions[i + 1];
+    }
+
+    /**
+     * Pick the next raise amount for the current raiser, by looking at what the NEXT actor
+     * has in the DB when facing this raiser.
+     *
+     * Example:
+     * - Current player = LJ wants to 3bet vs UTG open.
+     * - Next actor will be UTG.
+     * - So we query scenarios where hero_pos=UTG and villain_pos=LJ and pick a Raise size.
+     */
+    pickNextRaiseAction(nextActorPos, currentRaiserPos, minAmountBB) {
+        const actions = this.getRaiseActionsFromDB(nextActorPos, currentRaiserPos);
+        const parsed = actions
+            .map(a => ({ action: a, amt: this.parseActionAmount(a) }))
+            .filter(x => x.amt !== null);
+
+        if (parsed.length === 0) return null;
+
+        // Prefer the smallest raise strictly larger than the last raise amount
+        const larger = parsed
+            .filter(x => x.amt > (minAmountBB ?? 0))
+            .sort((a, b) => a.amt - b.amt);
+        if (larger.length > 0) return larger[0].action;
+
+        // Otherwise fall back to closest overall
+        parsed.sort((a, b) => Math.abs(a.amt - minAmountBB) - Math.abs(b.amt - minAmountBB));
+        return parsed[0].action;
+    }
+
+    getRaiseOptionsForActiveStep(stepIndex, pos, lastAggressor) {
+        // Determine who acts next after a raise from `pos`
+        // - RFI: next seat in orbit
+        // - Post-raise: action bounces back to previous aggressor
+        let nextActor = null;
+        let minAmt = 0;
+
+        if (!lastAggressor) {
+            nextActor = this.getNextPosInOrbit(pos);
+            minAmt = 0;
+        } else {
+            nextActor = lastAggressor.pos;
+            minAmt = this.parseActionAmount(lastAggressor.action) ?? 0;
+        }
+
+        if (!nextActor) return [];
+
+        const actions = this.getRaiseActionsFromDB(nextActor, pos)
+            .map(a => ({ action: a, amt: this.parseActionAmount(a) }))
+            .filter(x => x.amt !== null);
+
+        // Filter out illegal/non-increasing raises
+        const filtered = lastAggressor
+            ? actions.filter(x => x.amt > (minAmt + 0.001))
+            : actions;
+
+        filtered.sort((a, b) => a.amt - b.amt);
+        return filtered.map(x => x.action);
     }
 
     deriveContext(atIndex) {
@@ -777,33 +889,47 @@ class GTOTreeManager {
             // Look at steps BEFORE this one to find last aggressor
             const history = this.steps.slice(0, index).filter(s => s.action && s.action !== 'Fold');
             const lastAggressor = history.reverse().find(a => a.action && (a.action.includes('Raise') || a.action.includes('Allin')));
-            
-            if (lastAggressor) {
-                if (lastAggressor.action.includes('2.5') || lastAggressor.action.includes('2')) {
-                    raiseLabel = 'Raise 9'; 
-                    raiseValue = 'Raise 9';
-                } else if (lastAggressor.action.includes('9') || lastAggressor.action.includes('6.5')) {
-                    raiseLabel = 'Raise 22'; 
-                    raiseValue = 'Raise 22';
-                } else if (lastAggressor.action.includes('22') || lastAggressor.action.includes('14')) {
-                    raiseLabel = 'Raise 45'; 
-                    raiseValue = 'Raise 45';
-                }
-            } else if (pos === 'SB') {
-                raiseLabel = 'Raise 3';
-                raiseValue = 'Raise 3';
-            }
 
             let content = '';
             
             if (isActive) {
                 // Active Step
+                const strategy = this.getStrategyForCurrentState();
+                const canCall = this.hasAnyActionInStrategy(strategy, 'call', 0.01);
+                const canRaise = this.hasAnyActionInStrategy(strategy, 'raise', 0.01);
+                const canAllin = this.hasAnyActionInStrategy(strategy, 'raise_all_in', 0.01);
+
+                // Determine raise options from DB "graph"
+                const raiseOptions = this.getRaiseOptionsForActiveStep(index, pos, lastAggressor);
+                // Default label/value: smallest available (or fallback to Raise 2.5 / Raise 3 for SB RFI)
+                if (raiseOptions.length > 0) {
+                    raiseValue = raiseOptions[0];
+                    raiseLabel = raiseOptions[0];
+                } else if (!lastAggressor && pos === 'SB') {
+                    raiseLabel = 'Raise 3';
+                    raiseValue = 'Raise 3';
+                }
+
+                const allinAction = `Raise ${this.config.stackDepth}`;
+                const raiseAmt = this.parseActionAmount(raiseValue);
+                const isRaiseAllin = raiseAmt !== null && raiseAmt >= (this.config.stackDepth - 0.001);
+
+                // Build action buttons dynamically
+                const raiseButtons = canRaise
+                    ? (raiseOptions.length > 1
+                        ? raiseOptions.map(opt =>
+                            `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${opt}')">${opt}</button>`
+                          ).join('')
+                        : `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${raiseValue}')">${raiseLabel}</button>`
+                      )
+                    : '';
+
                 content = `
                     <div class="space-y-1 relative z-10">
                         <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-gray-400 border border-transparent hover:border-gray-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Fold')">Fold</button>
-                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-green-400 font-bold border border-transparent hover:border-green-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Call')">Call</button>
-                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${raiseValue}')">${raiseLabel}</button>
-                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Allin 100')">Allin</button>
+                        ${canCall ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-green-400 font-bold border border-transparent hover:border-green-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Call')">Call</button>` : ''}
+                        ${raiseButtons}
+                        ${(canAllin && !isRaiseAllin) ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${allinAction}')">Allin</button>` : ''}
                     </div>
                 `;
             } else if (action) {
@@ -811,7 +937,8 @@ class GTOTreeManager {
                 let colorClass = 'text-gray-400'; 
                 if (action.includes('Raise')) colorClass = 'text-red-400';
                 if (action.includes('Call')) colorClass = 'text-green-400';
-                if (action.includes('Allin')) colorClass = 'text-red-600';
+                const amt = this.parseActionAmount(action);
+                if (amt !== null && amt >= (this.config.stackDepth - 0.001)) colorClass = 'text-red-600';
                 
                 content = `<div class="text-sm font-bold ${colorClass} mt-2">${action}</div>`;
             } else {
