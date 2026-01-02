@@ -110,6 +110,17 @@ class GTOTreeManager {
         return this.getStrategyForContext(activePos, context.villainPos, context.prevAction, context.isRFI);
     }
 
+    async getVillainStats(name) {
+        try {
+            const res = await fetch(`/villain?name=${encodeURIComponent(name)}`);
+            if (!res.ok) return null;
+            return await res.json();
+        } catch (e) {
+            console.error("Failed to fetch villain stats:", e);
+            return null;
+        }
+    }
+
     /**
      * Fuzzy search for the closest GTO strategy based on action amount.
      */
@@ -159,6 +170,26 @@ class GTOTreeManager {
         }
         stratStmt.free();
         return strategy;
+    }
+
+    getVillainRFIRange(villainPos) {
+        if (!this.db) return null;
+        const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND prev_action = 'Fold'";
+        const stmt = this.db.prepare(query);
+        stmt.bind({ ':hero': villainPos });
+        
+        let id = null;
+        if (stmt.step()) id = stmt.getAsObject().id;
+        stmt.free();
+        
+        if (!id) return null;
+        
+        const strategy = this.getStrategyByScenarioId(id);
+        return Object.keys(strategy).filter(hand => {
+             const freqs = strategy[hand];
+             if (!freqs) return false;
+             return ((freqs.raise || 0) + (freqs.raise_all_in || 0) + (freqs.call || 0)) > 0.01;
+        }).join(',');
     }
 
     async estimateEquity(heroHandStr, villainPos) {
@@ -500,6 +531,121 @@ class GTOTreeManager {
         }
     }
 
+    async handleImageImport(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            const strategy = await this.processRangeImage(file);
+            
+            // Save to DB
+            const activeStep = this.steps[this.currentStepIndex];
+            const activePos = activeStep.pos;
+            const context = this.deriveContext();
+            const scenarioId = this.getOrCreateScenarioId(activePos, context);
+
+            this.db.exec("BEGIN TRANSACTION");
+            const stmt = this.db.prepare("INSERT OR REPLACE INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)");
+            for (const [hand, freqs] of Object.entries(strategy)) {
+                stmt.run([scenarioId, hand, JSON.stringify(freqs)]);
+            }
+            stmt.free();
+            this.db.exec("COMMIT");
+            
+            this.debouncedSave();
+            this.updateView();
+            
+            alert("Range imported successfully! Don't forget to Save Database (💾) if you want to keep changes.");
+
+        } catch (err) {
+            console.error("Image Import Failed", err);
+            alert("Import failed: " + err.message);
+        }
+        
+        // Clear input so same file can be selected again
+        e.target.value = '';
+    }
+
+    processRangeImage(file) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                
+                const strategy = {};
+                const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+                
+                // --- Auto-Crop Heuristic ---
+                // 1. Assume the Grid is a perfect Square (13x13).
+                // 2. Assume the Grid spans the full WIDTH of the image.
+                // 3. Assume any extra Height is the toolbar at the TOP.
+                
+                let gridSide = img.width;
+                let startX = 0;
+                let startY = 0;
+
+                // If image is taller than it is wide (Portrait/Toolbar on top)
+                if (img.height > img.width) {
+                    // The grid is at the bottom. The header takes up the difference.
+                    startY = img.height - img.width;
+                }
+                
+                const cellW = gridSide / 13;
+                const cellH = gridSide / 13;
+                
+                for(let r=0; r<13; r++) {
+                    for(let c=0; c<13; c++) {
+                        // Sample the center of each cell (safest point)
+                        const cx = startX + (c * cellW) + (cellW / 2);
+                        const cy = startY + (r * cellH) + (cellH / 2);
+                        
+                        // Bounds check
+                        if (cx < 0 || cx >= img.width || cy < 0 || cy >= img.height) continue;
+
+                        const p = ctx.getImageData(cx, cy, 1, 1).data; 
+                        const red = p[0], green = p[1], blue = p[2];
+                        const total = red + green + blue;
+
+                        let freqs = { fold: 1.0 }; // Default to fold
+
+                        // Skip dark colors (borders/text)
+                        if (total > 30) {
+                            const rP = red / total;
+                            const gP = green / total;
+                            const bP = blue / total;
+                            
+                            // Dominant Color Logic
+                            if (rP > 0.50) freqs = { raise: 1.0 };       // Red -> Raise
+                            else if (gP > 0.50) freqs = { call: 1.0 };  // Green -> Call
+                            else if (bP > 0.50) freqs = { fold: 1.0 };  // Blue -> Fold
+                            else {
+                                // Mixed Strategy (blended colors)
+                                freqs = { raise: rP, call: gP, fold: bP };
+                            }
+                        }
+                        
+                        // Map coordinates to Hand (e.g., 0,0 -> AA)
+                        const r1 = ranks[r];
+                        const r2 = ranks[c];
+                        let hand;
+                        if (r === c) hand = r1 + r2;       // Pair
+                        else if (r < c) hand = r1 + r2 + 's'; // Suited
+                        else hand = r2 + r1 + 'o';        // Offsuit
+                        
+                        strategy[hand] = freqs;
+                    }
+                }
+                resolve(strategy);
+            };
+            img.onerror = reject;
+            img.src = URL.createObjectURL(file);
+        });
+    }
+
     importPreviousRange() {
         if (!this.editMode) {
             alert("Please enable Edit Mode (✏️) to import ranges.");
@@ -784,6 +930,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const importBtn = document.getElementById('import-prev-btn');
         if (importBtn) importBtn.addEventListener('click', () => treeManager.importPreviousRange());
+
+        const importImgBtn = document.getElementById('import-img-btn');
+        const importImgInput = document.getElementById('import-img-input');
+        if (importImgBtn && importImgInput) {
+            importImgBtn.addEventListener('click', () => importImgInput.click());
+            importImgInput.addEventListener('change', (e) => treeManager.handleImageImport(e));
+        }
 
         const tools = document.querySelectorAll('.palette-tool');
         tools.forEach(btn => {
