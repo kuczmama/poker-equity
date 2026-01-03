@@ -44,6 +44,40 @@ You must strictly adhere to this color-coding system when categorizing players. 
     *   3-Bet > 10% = Bluffing light. 4-Bet bluff them or trap.
 *   **The "Nit" Rule:** If a Nit calls the flop, they have a pair. If they raise the turn/river, they have the nuts.
 *   **Bankroll Management:** The user is grinding from NL5 to NL10 ($200 goal). Prioritize low-variance, high-EV plays.
+
+### **Betting Heuristics & Hand Strength (The 0-1-2 System)**
+Use this framework to evaluate "Hero's" decisions vs Bet Sizes and Board Texture.
+
+**1. Bet Sizing Classification (Facing a Bet)**
+*   **Small (0-50% Pot):** Score 0.5
+*   **Medium (51-100% Pot):** Score 1.0
+*   **Big (101-150% Pot):** Score 1.5
+*   **Very Large (>150% Pot):** Score 2.0+
+
+**2. Hand Strength Categories (The "0-1-2" Rule)**
+*   **2 (Premium):** Strong Top Pair+, Premium Overpairs. -> **Action:** Bet / Raise / Call Large.
+*   **1 (Marginal):** Weak Top Pair, Middle Pair, Good Draws. -> **Action:** Check / Call Small-Medium / Pot Control.
+*   **0 (Junk):** Weak pairs, Air. -> **Action:** Check / Fold.
+
+**3. Required Strength Matrix (Facing a Bet)**
+*   *Columns = Bet Size Score (0.5, 1-2, 2.5+)*
+*   *Rows = Board Texture*
+*   **3 Paired Cards:** [Tight] | [Tight] | [Tight+]
+*   **4 Flush Cards:** [Tight] | [Tight+] | [Tight+]
+*   **4 Straight Cards:** [Tight] | [Tight] | [Tight+]
+*   **3 Flush Cards:** [Tight] | [Tight] | [Tight]
+*   **Low Cards:** [Loose+] | [Loose] | [Tight]
+*   **High Card:** [Loose] | [Tight] | [Tight]
+
+**4. Definitions of Range Strength**
+*   **Tight+:** Nuts or Near Nuts (Str. Flush, Quads, Strong FH, Nut Flush on 4-flush board).
+*   **Tight:** Set, Trips (Good Kicker), Two Pair, Overpair, TPTK, NFD, Combo Draw.
+*   **Loose:** TP (Weak Kicker), Gutshot.
+*   **Loose+:** Second Pair, Overcards, BDFD to Nuts.
+
+**5. Heuristic Rules**
+*   **Multi-way:** Check more often. Play tighter.
+*   **Evaluation:** If Hero continues with a "Loose" hand when the Matrix requires "Tight", mark it as a **MISTAKE**.
         `;
     }
 
@@ -158,6 +192,94 @@ You must strictly adhere to this color-coding system when categorizing players. 
         }
     }
 
+    static _computeStraightRunInfo(ranks) {
+        if (!Array.isArray(ranks)) throw new Error('ranks must be an array');
+        const uniq = Array.from(new Set(ranks)).sort((a, b) => a - b);
+        if (uniq.length === 0) {
+            return { maxRun: 0, uniqueSorted: [], isStraight5: false };
+        }
+
+        // A can be used as 1 for wheel detection (A-2-3-4-5)
+        const withWheelAce = uniq.includes(14) ? [...uniq, 1].sort((a, b) => a - b) : uniq;
+
+        let maxRun = 1;
+        let run = 1;
+        for (let i = 1; i < withWheelAce.length; i++) {
+            if (withWheelAce[i] === withWheelAce[i - 1]) continue;
+            if (withWheelAce[i] === withWheelAce[i - 1] + 1) {
+                run++;
+                maxRun = Math.max(maxRun, run);
+            } else {
+                run = 1;
+            }
+        }
+
+        const isStraight5 = (uniq.length === 5 && maxRun >= 5);
+        return { maxRun, uniqueSorted: uniq, isStraight5 };
+    }
+
+    static _computeBoardTexture(boardCards) {
+        if (!Array.isArray(boardCards)) throw new Error('boardCards must be an array');
+        const ranks = boardCards.map(c => c.rank);
+        const suits = boardCards.map(c => c.suit);
+
+        const rankCounts = {};
+        for (const r of ranks) rankCounts[r] = (rankCounts[r] || 0) + 1;
+        const suitCounts = {};
+        for (const s of suits) suitCounts[s] = (suitCounts[s] || 0) + 1;
+
+        const maxSuitCount = Object.values(suitCounts).reduce((m, v) => Math.max(m, v), 0);
+        const paired = Object.values(rankCounts).some(v => v >= 2);
+        const trips = Object.values(rankCounts).some(v => v >= 3);
+        const quads = Object.values(rankCounts).some(v => v >= 4);
+
+        const { maxRun, uniqueSorted, isStraight5 } = this._computeStraightRunInfo(ranks);
+        const fourToStraight = maxRun >= 4;
+        const threeToStraight = maxRun >= 3;
+
+        const flushOnBoard = boardCards.length === 5 && maxSuitCount >= 5;
+        const fourToFlush = maxSuitCount >= 4;
+        const threeToFlush = maxSuitCount >= 3;
+
+        return {
+            cardCount: boardCards.length,
+            ranksUniqueSorted: uniqueSorted,
+            maxStraightRun: maxRun,
+            straightOnBoard: isStraight5,
+            fourToStraightOnBoard: fourToStraight,
+            threeToStraightOnBoard: threeToStraight,
+            maxSuitCount,
+            flushOnBoard,
+            fourToFlushOnBoard: fourToFlush,
+            threeToFlushOnBoard: threeToFlush,
+            paired,
+            trips,
+            quads
+        };
+    }
+
+    static _validateNoDuplicateCards(label, cardStrs) {
+        const seen = new Set();
+        for (const c of cardStrs) {
+            const raw = String(c).trim().replace('10', 'T');
+            const norm = raw.length === 2 ? `${raw[0].toUpperCase()}${raw[1].toLowerCase()}` : raw;
+            if (seen.has(norm)) throw new Error(`Duplicate card detected in ${label}: ${norm}`);
+            seen.add(norm);
+        }
+    }
+
+    static _validateNoCardOverlap(labelA, cardStrsA, labelB, cardStrsB) {
+        const norm = (c) => {
+            const raw = String(c).trim().replace('10', 'T');
+            return raw.length === 2 ? `${raw[0].toUpperCase()}${raw[1].toLowerCase()}` : raw;
+        };
+        const a = new Set(cardStrsA.map(norm));
+        for (const c of cardStrsB) {
+            const n = norm(c);
+            if (a.has(n)) throw new Error(`Card overlap detected between ${labelA} and ${labelB}: ${n}`);
+        }
+    }
+
     static buildHeroHandByStreetSummary(handData) {
         if (!handData?.hero?.handStr) throw new Error('Cannot build hero hand summary: missing hero hand');
         if (handData.variant && handData.variant !== 'NLHE') {
@@ -171,6 +293,12 @@ You must strictly adhere to this color-coding system when categorizing players. 
         const flop = handData?.streets?.flop?.card || [];
         const turn = handData?.streets?.turn?.card || [];
         const river = handData?.streets?.river?.card || [];
+
+        // Fail fast on duplicated cards (prevents silent nonsense).
+        this._validateNoDuplicateCards('board', [...flop, ...turn, ...river]);
+        const heroCardStrs = handData.hero.handStr.match(/.{1,2}/g) || [];
+        this._validateNoDuplicateCards('hero hand', heroCardStrs);
+        this._validateNoCardOverlap('hero hand', heroCardStrs, 'board', [...flop, ...turn, ...river]);
 
         const boardFlop = flop.map(c => this._parseCardStr(c));
         const boardTurn = [...flop, ...turn].map(c => this._parseCardStr(c));
@@ -195,6 +323,77 @@ You must strictly adhere to this color-coding system when categorizing players. 
         }
 
         return lines.join('\n');
+    }
+
+    static _determineHeuristicCategory(texture, ranks) {
+        if (!texture || !ranks || ranks.length === 0) return 'N/A';
+        
+        // 1. 3 Paired Cards (Trips or Quads on board)
+        // User Heuristic: "3 Paired Cards" -> Tight+ (Quads/FH)
+        if (texture.trips || texture.quads) return '3 Paired Cards';
+
+        // 2. 4 Flush Cards
+        if (texture.fourToFlushOnBoard) return '4 Flush Cards';
+
+        // 3. 4 Straight Cards
+        if (texture.fourToStraightOnBoard) return '4 Straight Cards';
+
+        // 4. 3 Flush Cards
+        if (texture.threeToFlushOnBoard) return '3 Flush Cards';
+
+        // 5. High Card (Any card >= 10) vs Low Cards
+        // "High Card" heuristic implies board connects with broadway ranges.
+        const maxRank = Math.max(...ranks);
+        if (maxRank >= 10) return 'High Card';
+        
+        return 'Low Cards';
+    }
+
+    static buildBoardFactsByStreetSummary(handData) {
+        if (!handData?.streets) throw new Error('Cannot build board facts: missing streets');
+        if (!window.PokerSolver?.evaluateHand) throw new Error('PokerSolver not loaded (required for board evaluation)');
+
+        const flop = handData?.streets?.flop?.card || [];
+        const turn = handData?.streets?.turn?.card || [];
+        const river = handData?.streets?.river?.card || [];
+        const allBoard = [...flop, ...turn, ...river];
+        this._validateNoDuplicateCards('board', allBoard);
+
+        const summarize = (streetName, rawCards) => {
+            if (!rawCards || rawCards.length === 0) return null;
+            const parsed = rawCards.map(c => this._parseCardStr(c));
+            const ranks = parsed.map(c => c.rank);
+            const texture = this._computeBoardTexture(parsed);
+            const heuristicCategory = this._determineHeuristicCategory(texture, ranks);
+
+            let boardOnlyBest = null;
+            if (parsed.length === 5) {
+                const best = PokerSolver.evaluateHand(parsed);
+                boardOnlyBest = this._handToEnglish(best);
+            }
+
+            return {
+                street: streetName,
+                cards: rawCards,
+                boardOnlyBestHandIf5Cards: boardOnlyBest,
+                texture,
+                heuristicCategory // Deterministic classification for the user's matrix
+            };
+        };
+
+        const flopObj = summarize('flop', flop);
+        const turnObj = summarize('turn', [...flop, ...turn]);
+        const riverObj = summarize('river', [...flop, ...turn, ...river]);
+
+        const payload = {
+            note: 'These facts are computed from the parsed board. Treat as ground truth.',
+            flop: flopObj,
+            turn: turnObj,
+            river: riverObj
+        };
+
+        // Avoid backticks in prompts (template literal safety). Use clear sentinels instead.
+        return `BOARD_FACTS_JSON_START\n${JSON.stringify(payload, null, 2)}\nBOARD_FACTS_JSON_END`;
     }
 
     setApiKey(key) {
@@ -400,6 +599,7 @@ ${logs}
         ].filter(x => x).join('\n');
 
         const heroHandByStreet = LLMService.buildHeroHandByStreetSummary(handData);
+        const boardFactsByStreet = LLMService.buildBoardFactsByStreetSummary(handData);
 
         const systemPrompt = `
 You are an expert Poker Analyst and Coach for Micro-Stakes CoinPoker games.
@@ -416,6 +616,9 @@ ${this.FUNDAMENTALS}
 3.  **Final Score:** Give the play a score out of 10.
 4.  **Format:** Use Markdown with bolding for key insights.
 5.  **Critical:** At the start of each street section, restate "Hero has: ..." using the provided computed street hand summary. Do not contradict it.
+6.  **Critical Board Rule:** When you discuss board texture (straight/flush being on the board, 4-to-a-straight, 4-to-a-flush, etc.), you MUST use the provided BOARD_FACTS_JSON. If it says straightOnBoard=false, you must NOT claim there is a straight on the board.
+7.  **Deterministic Heuristic:** For the "Facing a Bet" matrix, you MUST use the \`heuristicCategory\` provided in BOARD_FACTS_JSON for each street (e.g., "High Card", "3 Flush Cards"). Do not guess the category yourself.
+8.  **If you detect contradictions:** Stop and explicitly say "DATA ERROR" and quote the conflicting fields from BOARD_FACTS_JSON.
 
 **Constraints:**
 *   DO NOT calculate equity yourself. Use the provided numbers or general principles.
@@ -431,6 +634,9 @@ ${this.FUNDAMENTALS}
 
 **Hero Hand Strength by Street (Computed / Deterministic):**
 ${heroHandByStreet}
+
+**Board Facts by Street (Computed / Deterministic):**
+${boardFactsByStreet}
 
 **Hand History & Math:**
 ${historyLog}
