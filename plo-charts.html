@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>PLO Charts - Poker Odds Calculator</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#38e07b",
+              "background-light": "#f6f8f7",
+              "background-dark": "#122017",
+            },
+            fontFamily: {
+              display: ["Space Grotesk"],
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; 
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200 flex flex-col min-h-screen">
+
+    <!-- Navbar -->
+    <nav class="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-gray-200 dark:border-gray-700">
+        <div class="max-w-6xl mx-auto flex flex-wrap justify-center gap-x-4 gap-y-2 items-center">
+            <a href="index.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Single Hand</a>
+            <span class="text-gray-400 hidden sm:inline">|</span>
+            <a href="range-equity.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Range Calc</a>
+            <span class="text-gray-400 hidden sm:inline">|</span>
+            <a href="range-visual.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Visual Range</a>
+            <span class="text-gray-400 hidden sm:inline">|</span>
+            <a href="bet-sizing.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Bet Sizing</a>
+            <span class="text-gray-400 hidden sm:inline">|</span>
+            <div class="relative group">
+                <a href="gto-charts.html" class="nav-link text-sm font-bold text-gray-600 dark:text-gray-400 hover:text-primary transition-colors flex items-center gap-1">
+                    GTO Charts <span class="text-[10px]">▼</span>
+                </a>
+                <div class="absolute left-0 top-full pt-2 w-48 hidden group-hover:block z-50">
+                    <div class="bg-gray-800 rounded-lg shadow-xl border border-gray-700 overflow-hidden">
+                        <a href="gto-charts.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Hold'em (6-max)</a>
+                        <a href="plo-charts.html" class="block px-4 py-2 text-sm text-primary font-bold bg-gray-700/50">PLO (6-max)</a>
+                    </div>
+                </div>
+            </div>
+            <span class="text-gray-400 hidden sm:inline">|</span>
+            <a href="villains.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Villains</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-grow container mx-auto p-4 flex flex-col gap-6 h-[calc(100vh-80px)]">
+        
+        <!-- Controls Header -->
+        <div class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700 flex justify-between items-center">
+             <div>
+                 <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                    <span class="bg-blue-600 text-white text-xs px-2 py-1 rounded">PLO</span>
+                    Scenario Selector
+                 </h1>
+                 <p class="text-xs text-gray-500 mt-1">Select positions and betting history to view ranges.</p>
+             </div>
+             
+             <!-- Mock Controls -->
+             <div class="flex gap-2 text-xs">
+                 <select class="bg-gray-900 border border-gray-600 rounded text-gray-300 px-2 py-1">
+                     <option>6-Max Cash 100bb</option>
+                 </select>
+                 <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">EP</button>
+                 <button class="px-3 py-1 bg-primary text-background-dark font-bold rounded">MP</button>
+                 <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">CO</button>
+                 <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">BTN</button>
+                 <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">SB</button>
+                 <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">BB</button>
+             </div>
+        </div>
+
+        <!-- Range Container -->
+        <div id="plo-ranges-container" class="flex-grow overflow-hidden relative">
+            <!-- Populated by plo-manager.js -->
+            <div class="flex items-center justify-center h-full text-gray-500">
+                Loading PLO data...
+            </div>
+        </div>
+
+    </main>
+
+    <script src="plo-manager.js"></script>
+</body>
+</html>
+

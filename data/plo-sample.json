@@ -1,0 +1,39 @@
+[
+    {
+        "combo": "[AT][AT]",
+        "weight": 0.0,
+        "ev": -6999.999999999999,
+        "strategy": { "Fold": 96.11, "Call": 0.76, "Pot": 3.12 }
+    },
+    {
+        "combo": "[AT]AT",
+        "weight": 0.0,
+        "ev": -7000.0,
+        "strategy": { "Fold": 100, "Call": 0, "Pot": 0 }
+    },
+    {
+        "combo": "[AJT]A",
+        "weight": 0.0,
+        "ev": -6999.999999999999,
+        "strategy": { "Fold": 50, "Call": 50, "Pot": 0 }
+    },
+    {
+        "combo": "[AJ][AT]",
+        "weight": 0.0,
+        "ev": -7000.0,
+        "strategy": { "Fold": 0, "Call": 100, "Pot": 0 }
+    },
+    {
+        "combo": "AATT",
+        "weight": 1.0,
+        "ev": 22.28,
+        "strategy": { "Fold": 0, "Call": 0, "Pot": 100 }
+    },
+    {
+        "combo": "AAJJ",
+        "weight": 1.0,
+        "ev": 22.03,
+        "strategy": { "Fold": 0, "Call": 0, "Pot": 100 }
+    }
+]
+

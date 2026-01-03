@@ -103,7 +103,17 @@
             <span class="text-gray-400 hidden sm:inline">|</span>
             <a href="bet-sizing.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Bet Sizing</a>
             <span class="text-gray-400 hidden sm:inline">|</span>
-            <a href="gto-charts.html" class="nav-link text-sm font-bold text-primary transition-colors">GTO Charts</a>
+            <div class="relative group">
+                <a href="gto-charts.html" class="nav-link text-sm font-bold text-primary transition-colors flex items-center gap-1">
+                    GTO Charts <span class="text-[10px]">▼</span>
+                </a>
+                <div class="absolute left-0 top-full pt-2 w-48 hidden group-hover:block z-50">
+                    <div class="bg-gray-800 rounded-lg shadow-xl border border-gray-700 overflow-hidden">
+                        <a href="gto-charts.html" class="block px-4 py-2 text-sm text-primary font-bold bg-gray-700/50">Hold'em (6-max)</a>
+                        <a href="plo-charts.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">PLO (6-max)</a>
+                    </div>
+                </div>
+            </div>
             <span class="text-gray-400 hidden sm:inline">|</span>
             <a href="villains.html" class="nav-link text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors">Villains</a>
         </div>
