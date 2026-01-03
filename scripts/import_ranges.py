@@ -3,6 +3,7 @@ import sqlite3
 import glob
 import os
 import sys
+import re
 
 # Add parent dir to path to import anything if needed, though we use standalone logic here
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,6 +12,122 @@ DB_FILE = 'data/gto.db'
 
 def get_db():
     return sqlite3.connect(DB_FILE)
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """
+    Ensure the required tables exist. This importer is used standalone and should not assume
+    a pre-existing DB created by another script.
+    """
+    cur = conn.cursor()
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS scenarios (
+        id INTEGER PRIMARY KEY,
+        variant TEXT DEFAULT 'Cash',
+        table_size INTEGER DEFAULT 7,
+        stack_depth INTEGER DEFAULT 100,
+        name TEXT,
+        hero_pos TEXT,
+        villain_pos TEXT,
+        prev_action TEXT,
+        pot_type TEXT
+    );
+    ''')
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS strategies (
+        scenario_id INTEGER,
+        hand TEXT,
+        frequencies TEXT,
+        FOREIGN KEY(scenario_id) REFERENCES scenarios(id),
+        PRIMARY KEY (scenario_id, hand)
+    );
+    ''')
+    conn.commit()
+
+def load_spot_index(path: str) -> dict:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Spot index not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict) or not isinstance(data.get("spots"), list):
+        raise ValueError(f"Invalid spot index format: {path}")
+    out = {}
+    for spot in data["spots"]:
+        if not isinstance(spot, dict):
+            continue
+        of = spot.get("output_file")
+        pre = (spot.get("params") or {}).get("preflop_actions", "")
+        if isinstance(of, str):
+            out[of] = str(pre)
+    return out
+
+def action_str_from_preflop_code(code: str, stack_depth: int = 100) -> str:
+    code = str(code).strip()
+    if code == "RAI":
+        return f"Allin {stack_depth}"
+    if code.startswith("R"):
+        raw = code[1:]
+        try:
+            n = float(raw)
+            if n.is_integer():
+                return f"Raise {int(n)}"
+            return f"Raise {n}"
+        except Exception:
+            return f"Raise {raw}"
+    if code == "C":
+        return "Call"
+    if code == "F":
+        return "Fold"
+    return code
+
+FILENAME_RE = re.compile(r"^([A-Z0-9\+_]+)_vs_([A-Z0-9\+_]+)_(OPEN|3BET|4BET|5BET|6BET)\.json$")
+
+def scenario_from_filename(filename: str, preflop_actions: str) -> tuple[str, str, str, str]:
+    """
+    Returns (hero_pos, villain_pos, prev_action, pot_type) derived from the known naming scheme
+    plus the spot's `preflop_actions` (from the spot index).
+    """
+    base = os.path.basename(filename)
+    if base.endswith("_RFI.json"):
+        hero = base[: -len("_RFI.json")]
+        return hero, "Blinds", "Fold", "SRP"
+
+    m = FILENAME_RE.match(base)
+    if not m:
+        raise ValueError(f"Unrecognized preflop filename format: {base}")
+
+    left, right, suffix = m.group(1), m.group(2), m.group(3)
+    if suffix == "OPEN":
+        hero, villain = left, right
+        pot = "SRP"
+    elif suffix == "3BET":
+        # OPENER_vs_THREEBETTOR_3BET => opener acts facing the 3bet
+        hero, villain = left, right
+        pot = "3BP"
+    elif suffix == "4BET":
+        # THREEBETTOR_vs_OPENER_4BET => threebettor acts facing the 4bet
+        hero, villain = left, right
+        pot = "4BP"
+    elif suffix == "5BET":
+        hero, villain = left, right
+        pot = "4BP"
+    elif suffix == "6BET":
+        hero, villain = left, right
+        pot = "4BP"
+    else:
+        raise ValueError(f"Unhandled suffix: {suffix}")
+
+    parts = [p.strip() for p in str(preflop_actions).split("-") if p.strip()]
+    # For HU spots, preflop_actions may end with forced folds to bring action back (e.g. ...-R7.5-F-F-F).
+    # We want the last *non-fold* action as the villain action we're facing.
+    last_non_fold = None
+    for p in reversed(parts):
+        if p != "F":
+            last_non_fold = p
+            break
+    if not last_non_fold:
+        raise ValueError(f"No non-fold action found in preflop_actions for {base}: {preflop_actions}")
+    prev_action = action_str_from_preflop_code(last_non_fold)
+    return hero, villain, prev_action, pot
 
 def parse_action_str(action_obj):
     """
@@ -77,6 +194,9 @@ def parse_solver_json(data, conn, cursor, source_file=None):
         print("  Skipping: Could not identify Hero Position.")
         return 0
 
+    # Normalization for 7-max (GTO Wizard UTG+2 -> UTG)
+    if hero_pos == 'UTG+2': hero_pos = 'UTG'
+    
     # 2. Determine Scenario Context
     # Find the aggressor (Villain) by looking at chips on table
     villain_pos = 'Blinds'
@@ -89,7 +209,10 @@ def parse_solver_json(data, conn, cursor, source_file=None):
     aggressor = None
     
     for p in players:
-        if p['position'] == hero_pos: continue # Ignore Hero for determining who we are facing
+        p_pos = p['position']
+        if p_pos == 'UTG+2': p_pos = 'UTG' # Normalize villain pos too
+        
+        if p_pos == hero_pos: continue # Ignore Hero for determining who we are facing
         
         try:
             chips = float(p.get('chips_on_table', 0))
@@ -109,6 +232,7 @@ def parse_solver_json(data, conn, cursor, source_file=None):
     else:
         # Facing a Raise/Limp
         villain_pos = aggressor.get('position', 'Unknown')
+        if villain_pos == 'UTG+2': villain_pos = 'UTG' # Normalize
         
         # Determine action string
         if float(max_chips).is_integer():
@@ -220,7 +344,15 @@ def import_files():
     print(f"Found {len(files)} files to import.")
     
     conn = get_db()
+    ensure_schema(conn)
     cursor = conn.cursor()
+
+    # Prefer the HU spot index (contains forced folds) for correct scenario mapping.
+    # If you are importing the old non-HU set, pass a different file here.
+    spot_index_path = 'data/import_ranges/gtowizard_spots.7max.preflop.headsup.json'
+    spot_preflop_by_file = {}
+    if os.path.exists(spot_index_path):
+        spot_preflop_by_file = load_spot_index(spot_index_path)
 
     total_scenarios = 0
     
@@ -231,6 +363,11 @@ def import_files():
                 data = json.load(f)
         except Exception as e:
             print(f"Error reading {fpath}: {e}")
+            continue
+
+        base = os.path.basename(fpath)
+        # Skip non-solution index/config files in this directory.
+        if base.startswith("gtowizard_spots.") or base.endswith(".checkpoint.json") or base == "example_template.json":
             continue
 
         # Some exports are a top-level list (e.g. action_solutions only)
@@ -247,7 +384,93 @@ def import_files():
         # Detect Format
         # Format 1: Solver Export (has action_solutions)
         if 'action_solutions' in data:
-            total_scenarios += parse_solver_json(data, conn, cursor, fpath)
+            # If we have a spot index entry for this file, use it to build scenario context.
+            pre = spot_preflop_by_file.get(base)
+            if pre:
+                hero_pos, villain_pos, prev_action, pot_type = scenario_from_filename(base, pre)
+                scenario_name = f"{hero_pos} vs {villain_pos} ({prev_action})" if prev_action != "Fold" else f"{hero_pos} RFI"
+
+                # Upsert scenario by key
+                cursor.execute('SELECT id FROM scenarios WHERE hero_pos=? AND villain_pos=? AND prev_action=?',
+                               (hero_pos, villain_pos, prev_action))
+                row = cursor.fetchone()
+                if row:
+                    scenario_id = row[0]
+                else:
+                    cursor.execute('''
+                        INSERT INTO scenarios (variant, table_size, stack_depth, name, hero_pos, villain_pos, prev_action, pot_type)
+                        VALUES ('Cash', 7, 100, ?, ?, ?, ?, ?)
+                    ''', (scenario_name, hero_pos, villain_pos, prev_action, pot_type))
+                    scenario_id = cursor.lastrowid
+
+                # Parse strategy from simple_hand_counters (same logic as parse_solver_json but without heuristics)
+                counters = {}
+                p_infos = data.get('players_info', [])
+                game = data.get('game', {})
+                active_pos = game.get('active_position')
+
+                # Fail-fast validation: ensure the downloaded node matches the spot list / filename.
+                # For our HU preflop library, the acting player must be the scenario hero.
+                if isinstance(active_pos, str) and active_pos:
+                    allowed = {hero_pos}
+                    # CoinPoker mapping: UTG is GTOW UTG+2 in the raw exports
+                    if hero_pos == "UTG":
+                        allowed.add("UTG+2")
+                    if active_pos not in allowed:
+                        raise RuntimeError(
+                            f"Spot mismatch for {base}: expected active_position in {sorted(allowed)}, got '{active_pos}'.\n"
+                            f"This file likely came from the non-HU spot list and needs re-fetch with --overwrite."
+                        )
+
+                # Prefer counters for the hero seat, not game.active_position (which can be wrong if the file is stale).
+                for info in p_infos:
+                    p_data = info.get('player', {})
+                    if p_data.get('position') == hero_pos:
+                        counters = info.get('simple_hand_counters', {})
+                        break
+                if not counters:
+                    counters = data.get('simple_hand_counters', {})
+                if not counters:
+                    print("  Warning: No simple_hand_counters found for Hero.")
+                    continue
+
+                # Overwrite strategy
+                cursor.execute('DELETE FROM strategies WHERE scenario_id=?', (scenario_id,))
+
+                # Map solver action codes to DB keys
+                action_map = {}
+                for sol in data.get('action_solutions', []):
+                    code = sol['action']['code']
+                    atype = sol['action']['type'].upper()
+                    if atype == 'FOLD':
+                        action_map[code] = 'fold'
+                    elif atype == 'CALL':
+                        action_map[code] = 'call'
+                    elif atype == 'RAISE':
+                        if sol['action'].get('allin'):
+                            action_map[code] = 'raise_all_in'
+                        else:
+                            action_map[code] = 'raise'
+                    elif atype == 'ALLIN':
+                        action_map[code] = 'raise_all_in'
+
+                for hand, details in counters.items():
+                    solver_freqs = details.get('actions_total_frequencies', {})
+                    db_freqs = {}
+                    for code, freq in solver_freqs.items():
+                        if freq > 0.001:
+                            db_key = action_map.get(code)
+                            if not db_key:
+                                raise RuntimeError(f"Unknown solver action code '{code}' in {base} (fail-fast)")
+                            db_freqs[db_key] = db_freqs.get(db_key, 0) + freq
+                    if db_freqs:
+                        cursor.execute('INSERT INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)',
+                                       (scenario_id, hand, json.dumps(db_freqs)))
+
+                total_scenarios += 1
+            else:
+                # Fallback to legacy heuristics if no spot index mapping exists.
+                total_scenarios += parse_solver_json(data, conn, cursor, fpath)
             continue
 
         # Format 2: Simple Chain (has history_actions)

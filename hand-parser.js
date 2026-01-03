@@ -4,6 +4,10 @@ class CoinPokerParser {
         // BTN=0, SB=1, BB=2...
     }
 
+    cleanName(name) {
+        return name.replace(/\s*\((?:BTN|SB|BB|CO|HJ|LJ|UTG(?:\+\d+)?)\)$/, '').trim();
+    }
+
     parse(text) {
         if (!text) throw new Error("No hand history text provided");
 
@@ -48,7 +52,7 @@ class CoinPokerParser {
                 if (match) {
                     data.players.push({
                         seat: parseInt(match[1]),
-                        name: match[2],
+                        name: this.cleanName(match[2]),
                         stack: parseFloat(match[3].replace(',', ''))
                     });
                 }
@@ -59,7 +63,7 @@ class CoinPokerParser {
                 const match = line.match(/Dealt to (.+) \[(.+)\]/);
                 if (match) {
                     data.hero = { 
-                        name: match[1], 
+                        name: this.cleanName(match[1]), 
                         handStr: match[2].replace(/\s/g, '').replace(/10/g, 'T') // Normalize to "AsKh"
                     };
                 }
@@ -111,7 +115,7 @@ class CoinPokerParser {
     recordAction(data, line, type, section) {
         // Simple extraction: "Name: type amount"
         const parts = line.split(':');
-        const name = parts[0];
+        const name = this.cleanName(parts[0]);
         
         // Extract amount if any
         let amount = 0;

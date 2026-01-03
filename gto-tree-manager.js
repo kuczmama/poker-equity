@@ -21,6 +21,8 @@ class GTOTreeManager {
         };
         
         this.db = null;
+        this.spotPreflopActionsByFile = null; // Map<string,string>
+        this.openRaiseByOpener = null; // Map<string,string> where opener is our 7-max seat label
         this.editMode = false;
         this.currentTool = 'raise'; // Default tool
         this.isPainting = false;
@@ -40,8 +42,12 @@ class GTOTreeManager {
         this.renderTreeControls();
         this.updateView();
         
-        // Load Database
-        await this.loadDatabase();
+        // Load Database + GTOW spot index (for action sizing) in parallel
+        await Promise.all([
+            this.loadDatabase(),
+            this.loadSpotIndex()
+        ]);
+        this.updateView(); // Refresh with DB + spot sizing data
     }
 
     async loadDatabase() {
@@ -61,6 +67,71 @@ class GTOTreeManager {
             console.error("Failed to load DB", e);
             alert("Could not load GTO database. Check console.");
         }
+    }
+
+    async loadSpotIndex() {
+        // This file is a compact index of the GTOWizard preflop graph we generated (action codes like R2.5, R7.5, RAI).
+        // We use it to mirror the exact bet sizing flow, instead of guessing from pot_type or numeric heuristics.
+        const res = await fetch('data/import_ranges/gtowizard_spots.7max.preflop.headsup.json');
+        if (!res.ok) {
+            throw new Error(`Failed to load GTOW spot index: ${res.status} ${res.statusText}`);
+        }
+        const data = await res.json();
+        if (!data || !Array.isArray(data.spots)) {
+            throw new Error("Invalid GTOW spot index format: missing 'spots' array.");
+        }
+
+        this.spotPreflopActionsByFile = new Map();
+        this.openRaiseByOpener = new Map();
+
+        for (const spot of data.spots) {
+            const outputFile = spot?.output_file;
+            const pre = spot?.params?.preflop_actions ?? '';
+            if (typeof outputFile !== 'string') continue;
+            this.spotPreflopActionsByFile.set(outputFile, String(pre));
+
+            // Precompute open sizes from "*_vs_<OPENER>_OPEN.json" nodes.
+            // Example: "LJ_vs_UTG_OPEN.json" has preflop_actions "...-R2.5" where 2.5 is the open size.
+            const m = outputFile.match(/^[A-Z0-9\+_]+_vs_([A-Z0-9\+_]+)_OPEN\.json$/);
+            if (m) {
+                const opener = m[1];
+                const raiseStr = this.raiseStringFromPreflopActions(String(pre));
+                if (raiseStr) {
+                    // Only set once; if multiple exist, they should agree for a given opener.
+                    if (!this.openRaiseByOpener.has(opener)) this.openRaiseByOpener.set(opener, raiseStr);
+                }
+            }
+        }
+    }
+
+    raiseStringFromPreflopActions(preflopActions) {
+        // preflopActions is like "F-F-R2.5-R7.5-R15-R26-RAI"
+        const parts = String(preflopActions || '').split('-').map(s => s.trim()).filter(Boolean);
+        if (parts.length === 0) return null;
+        
+        // HU nodes often end with forced folds (e.g. "...-R7.5-F-F-F-F-F"),
+        // so we want the last NON-fold action as the raise sizing token.
+        let token = null;
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const p = parts[i];
+            if (p !== 'F') {
+                token = p;
+                break;
+            }
+        }
+        if (!token) return null;
+
+        if (token === 'RAI') return `Allin ${this.config.stackDepth}`;
+        if (token.startsWith('R')) {
+            const raw = token.slice(1);
+            const n = parseFloat(raw);
+            if (Number.isFinite(n)) {
+                const s = Number.isInteger(n) ? String(Math.trunc(n)) : String(n);
+                return `Raise ${s}`;
+            }
+            return `Raise ${raw}`;
+        }
+        return null;
     }
 
     toggleEditMode() {
@@ -97,6 +168,35 @@ class GTOTreeManager {
     }
 
     // --- Data Retrieval ---
+    mapPositionToDB(pos) {
+        // Map Frontend 7-max positions to GTO Wizard DB positions
+        // Frontend: UTG, LJ, HJ, CO, BTN, SB, BB
+        // DB (Imported): UTG+2, LJ, HJ, CO, BTN, SB, BB
+        if (pos === 'UTG') return 'UTG+2';
+        return pos;
+    }
+
+    mapVillainPositionToDB(pos) {
+        // IMPORTANT: In the imported DB, "UTG" is frequently used as the opener label in villain_pos
+        // for "*_vs_UTG_OPEN" and similar scenarios, even though the RFI node may be stored as UTG+2.
+        // If we map villain "UTG" -> "UTG+2" we break the graph edge discovery for open sizes.
+        if (pos === 'UTG') return 'UTG';
+        return pos;
+    }
+
+    getHeroPosCandidates(pos) {
+        // The imported GTOW dataset is inconsistent about whether "our UTG" is stored as UTG+2 or UTG.
+        // We treat them as aliases and try both (in priority order) when locating a scenario node.
+        if (pos === 'UTG') return ['UTG+2', 'UTG'];
+        return [pos];
+    }
+
+    getVillainPosCandidates(pos) {
+        // Same aliasing for villain positions. Some nodes label the opener as UTG even if the RFI node is UTG+2.
+        if (pos === 'UTG') return ['UTG', 'UTG+2'];
+        return [pos];
+    }
+
     getStrategyForCurrentState() {
         if (!this.db) return {}; 
         
@@ -127,29 +227,35 @@ class GTOTreeManager {
     findClosestStrategy(heroPos, villainPos, actionAmountBB) {
         if (!this.db) return {};
 
-        const query = "SELECT id, prev_action FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain";
-        const stmt = this.db.prepare(query);
-        stmt.bind({ ':hero': heroPos, ':villain': villainPos });
-
         let bestScenarioId = null;
         let minDiff = Infinity;
         let bestMatchAction = "";
 
-        while (stmt.step()) {
-            const row = stmt.getAsObject();
-            const match = row.prev_action.match(/Raise\s+([\d\.]+)/i);
-            if (match) {
-                const dbAmount = parseFloat(match[1]);
-                const diff = Math.abs(dbAmount - actionAmountBB);
-                
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    bestScenarioId = row.id;
-                    bestMatchAction = row.prev_action;
+        const heroCandidates = this.getHeroPosCandidates(heroPos);
+        const villainCandidates = this.getVillainPosCandidates(villainPos);
+
+        const query = "SELECT id, prev_action FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain";
+
+        for (const dbHero of heroCandidates) {
+            for (const dbVillain of villainCandidates) {
+                const stmt = this.db.prepare(query);
+                stmt.bind({ ':hero': dbHero, ':villain': dbVillain });
+                while (stmt.step()) {
+                    const row = stmt.getAsObject();
+                    const match = row.prev_action.match(/Raise\s+([\d\.]+)/i);
+                    if (match) {
+                        const dbAmount = parseFloat(match[1]);
+                        const diff = Math.abs(dbAmount - actionAmountBB);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            bestScenarioId = row.id;
+                            bestMatchAction = row.prev_action;
+                        }
+                    }
                 }
+                stmt.free();
             }
         }
-        stmt.free();
 
         if (bestScenarioId) {
             console.log(`Fuzzy Match: Input ${actionAmountBB.toFixed(1)}bb -> Matched "${bestMatchAction}" (Diff: ${minDiff.toFixed(2)})`);
@@ -174,9 +280,10 @@ class GTOTreeManager {
 
     getVillainRFIRange(villainPos) {
         if (!this.db) return null;
+        const dbVillain = this.mapPositionToDB(villainPos);
         const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND prev_action = 'Fold'";
         const stmt = this.db.prepare(query);
-        stmt.bind({ ':hero': villainPos });
+        stmt.bind({ ':hero': dbVillain });
         
         let id = null;
         if (stmt.step()) id = stmt.getAsObject().id;
@@ -244,27 +351,38 @@ class GTOTreeManager {
     getStrategyForContext(heroPos, villainPos, prevAction, isRFI) {
         if (!this.db) return {};
 
-        let query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain AND prev_action = :prev";
-        let params = {
-            ':hero': heroPos,
-            ':villain': villainPos,
-            ':prev': prevAction
-        };
+        const heroCandidates = this.getHeroPosCandidates(heroPos);
+        const villainCandidates = isRFI ? ['Blinds'] : this.getVillainPosCandidates(villainPos);
 
-        if (isRFI) {
-             query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
-             params = { ':hero': heroPos };
-        }
-        
-        const stmt = this.db.prepare(query);
-        stmt.bind(params);
-        
         let scenarioId = null;
-        if (stmt.step()) {
-            const row = stmt.getAsObject();
-            scenarioId = row.id;
+        if (isRFI) {
+            const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
+            for (const dbHero of heroCandidates) {
+                const stmt = this.db.prepare(query);
+                stmt.bind({ ':hero': dbHero });
+                if (stmt.step()) {
+                    scenarioId = stmt.getAsObject().id;
+                    stmt.free();
+                    break;
+                }
+                stmt.free();
+            }
+        } else {
+            const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain AND prev_action = :prev";
+            for (const dbHero of heroCandidates) {
+                for (const dbVillain of villainCandidates) {
+                    const stmt = this.db.prepare(query);
+                    stmt.bind({ ':hero': dbHero, ':villain': dbVillain, ':prev': prevAction });
+                    if (stmt.step()) {
+                        scenarioId = stmt.getAsObject().id;
+                        stmt.free();
+                        break;
+                    }
+                    stmt.free();
+                }
+                if (scenarioId) break;
+            }
         }
-        stmt.free();
 
         if (scenarioId) return this.getStrategyByScenarioId(scenarioId);
 
@@ -297,24 +415,37 @@ class GTOTreeManager {
     /**
      * Return candidate "Raise X" actions available in DB for (hero_pos, villain_pos).
      */
-    getRaiseActionsFromDB(heroPos, villainPos) {
+    getRaiseActionsFromDB(heroPos, villainPos, potType) {
         if (!this.db) return [];
-        const query = `
+        
+        let query = `
             SELECT prev_action
             FROM scenarios
             WHERE hero_pos = :hero
               AND villain_pos = :villain
-              AND prev_action LIKE 'Raise %'
+              AND (prev_action LIKE 'Raise %' OR prev_action LIKE 'Allin %')
         `;
-        const stmt = this.db.prepare(query);
-        stmt.bind({ ':hero': heroPos, ':villain': villainPos });
+        const heroCandidates = this.getHeroPosCandidates(heroPos);
+        const villainCandidates = this.getVillainPosCandidates(villainPos);
+        
+        if (potType) {
+            query += ` AND pot_type = :potType`;
+        }
 
         const actions = [];
-        while (stmt.step()) {
-            const row = stmt.getAsObject();
-            if (row.prev_action) actions.push(String(row.prev_action));
+        for (const dbHero of heroCandidates) {
+            for (const dbVillain of villainCandidates) {
+                const params = { ':hero': dbHero, ':villain': dbVillain };
+                if (potType) params[':potType'] = potType;
+                const stmt = this.db.prepare(query);
+                stmt.bind(params);
+                while (stmt.step()) {
+                    const row = stmt.getAsObject();
+                    if (row.prev_action) actions.push(String(row.prev_action));
+                }
+                stmt.free();
+            }
         }
-        stmt.free();
 
         // Deduplicate
         return Array.from(new Set(actions));
@@ -356,33 +487,45 @@ class GTOTreeManager {
     }
 
     getRaiseOptionsForActiveStep(stepIndex, pos, lastAggressor) {
-        // Determine who acts next after a raise from `pos`
-        // - RFI: next seat in orbit
-        // - Post-raise: action bounces back to previous aggressor
-        let nextActor = null;
-        let minAmt = 0;
+        // Mirror the imported GTOWizard bet-sizing flow using the spot index (data/import_ranges/gtowizard_spots.7max.preflop.json).
+        // This avoids accidentally mixing open sizes + 3bet sizes + 4bet sizes in the same menu.
+        //
+        // At each decision node, GTOW effectively offers one canonical non-allin raise size.
+        // We derive that size from the "next" spot file in the chain:
+        // - No raises yet: opener size comes from "*_vs_<OPENER>_OPEN.json"
+        // - Facing open (1 raise): 3bet size comes from "<OPENER>_vs_<HERO>_3BET.json"
+        // - Facing 3bet (2 raises): 4bet size comes from "<3BETTOR>_vs_<HERO>_4BET.json"
+        // - etc.
 
-        if (!lastAggressor) {
-            nextActor = this.getNextPosInOrbit(pos);
-            minAmt = 0;
-        } else {
-            nextActor = lastAggressor.pos;
-            minAmt = this.parseActionAmount(lastAggressor.action) ?? 0;
+        const history = this.getActionHistory(stepIndex);
+        const raises = history.filter(s => s.action.includes('Raise') || s.action.includes('Allin'));
+        const raiseCount = raises.length;
+
+        // RFI node: open size for this seat
+        if (raiseCount === 0) {
+            const raiseStr = this.openRaiseByOpener?.get(pos);
+            return raiseStr ? [raiseStr] : [];
         }
 
-        if (!nextActor) return [];
+        if (!lastAggressor || !this.spotPreflopActionsByFile) return [];
 
-        const actions = this.getRaiseActionsFromDB(nextActor, pos)
-            .map(a => ({ action: a, amt: this.parseActionAmount(a) }))
-            .filter(x => x.amt !== null);
+        // Determine which bet stage we are at:
+        // 1 raise -> 3BET, 2 raises -> 4BET, 3 raises -> 5BET, 4 raises -> 6BET
+        const stageNum = raiseCount + 2;
+        const stage = `${stageNum}BET`;
+        const keyFile = `${lastAggressor.pos}_vs_${pos}_${stage}.json`;
+        const pre = this.spotPreflopActionsByFile.get(keyFile);
+        if (!pre) return [];
 
-        // Filter out illegal/non-increasing raises
-        const filtered = lastAggressor
-            ? actions.filter(x => x.amt > (minAmt + 0.001))
-            : actions;
+        const raiseStr = this.raiseStringFromPreflopActions(pre);
+        if (!raiseStr) return [];
 
-        filtered.sort((a, b) => a.amt - b.amt);
-        return filtered.map(x => x.action);
+        // Enforce monotonic sizing when applicable
+        const minAmt = this.parseActionAmount(lastAggressor.action) ?? 0;
+        const amt = this.parseActionAmount(raiseStr);
+        if (amt !== null && amt <= (minAmt + 0.001)) return [];
+
+        return [raiseStr];
     }
 
     deriveContext(atIndex) {
@@ -470,14 +613,17 @@ class GTOTreeManager {
     }
     
     getOrCreateScenarioId(hero, ctx) {
+        const dbHero = this.mapPositionToDB(hero);
+        const dbVillain = this.mapPositionToDB(ctx.villainPos);
+
         let query, params;
         
         if (ctx.isRFI) {
             query = "SELECT id FROM scenarios WHERE hero_pos = ? AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
-            params = [hero];
+            params = [dbHero];
         } else {
             query = "SELECT id FROM scenarios WHERE hero_pos = ? AND villain_pos = ? AND prev_action = ?";
-            params = [hero, ctx.villainPos, ctx.prevAction];
+            params = [dbHero, dbVillain, ctx.prevAction];
         }
         
         const res = this.db.exec(query, params);
@@ -485,9 +631,9 @@ class GTOTreeManager {
              return res[0].values[0][0];
         }
         
-        const name = `${hero} vs ${ctx.villainPos || 'Blinds'} (${ctx.prevAction})`;
+        const name = `${dbHero} vs ${dbVillain || 'Blinds'} (${ctx.prevAction})`;
         this.db.run("INSERT INTO scenarios (name, hero_pos, villain_pos, prev_action, pot_type) VALUES (?, ?, ?, ?, ?)",
-                    [name, hero, ctx.villainPos || 'Blinds', ctx.prevAction, 'SRP']);
+                    [name, dbHero, dbVillain || 'Blinds', ctx.prevAction, 'SRP']);
         
         const lastIdRes = this.db.exec("SELECT last_insert_rowid()");
         return lastIdRes[0].values[0][0];
@@ -545,35 +691,59 @@ class GTOTreeManager {
         
         // 2. Truncate any future steps (changing history invalidates the future)
         this.steps = this.steps.slice(0, stepIndex + 1);
-        
-        // 3. Move current focus to next possible step
-        this.currentStepIndex = stepIndex + 1;
-        
-        // 4. Ensure we have the base positions filled if we haven't completed the first orbit
+
+        const isRaise = action.includes('Raise') || action.includes('Allin');
+        const isCall = action.includes('Call');
+
+        // Ensure we always show a full 7-max orbit (coinpoker display), even though the underlying data is heads-up.
         while (this.steps.length < this.positions.length) {
             const nextPos = this.positions[this.steps.length];
             this.steps.push({ pos: nextPos, action: null });
         }
-        
-        // 5. Dynamic Tree Extension (Ping-Pong Logic)
-        // If a Raise/Allin occurred, we need to check if it's a 3-bet/4-bet that requires a response
-        // from a previous aggressor.
-        if (action.includes('Raise') || action.includes('Allin')) {
-            // Get all active actions including the one we just made
-            const activeSteps = this.steps.filter(s => s.action && s.action !== 'Fold');
-            const raisers = activeSteps.filter(s => s.action.includes('Raise') || s.action.includes('Allin'));
-            
-            // If there are 2 or more raisers, the action bounces back to the previous aggressor
-            if (raisers.length >= 2) {
-                // Example: HJ Raise, BB Raise. 
-                // raisers = [HJ, BB]. We just processed BB.
-                // Previous aggressor is HJ.
-                const previousAggressor = raisers[raisers.length - 2];
-                
-                // Append a new decision step for the previous aggressor
-                this.steps.push({ pos: previousAggressor.pos, action: null });
+
+        // Force any "skipped" earlier positions to fold (so we don't visually compress the line).
+        // Example: UTG folds, user jumps to HJ and raises -> LJ is auto-marked Fold.
+        for (let i = 0; i < stepIndex; i++) {
+            if (!this.steps[i].action) {
+                this.steps[i] = { pos: this.steps[i].pos, action: 'Fold' };
             }
         }
+
+        // Determine how many raises have occurred so far (heads-up spot graph assumption).
+        // Your imported GTOWizard preflop set is heads-up per pairing, so once a second raise occurs
+        // (3-bet or higher), action should immediately bounce back to the previous aggressor and we
+        // should NOT continue the orbit to later seats (no multiway modeling).
+        const activeSteps = this.steps.filter(s => s.action && s.action !== 'Fold');
+        const raisers = activeSteps.filter(s => s.action.includes('Raise') || s.action.includes('Allin'));
+
+        // If someone takes a non-fold action facing a raise (call or raise), we are now in a heads-up branch.
+        // Force all later unopened seats in the first orbit to fold so the visual line stays 7-max but deterministic.
+        if ((isCall || isRaise) && raisers.length >= 1) {
+            for (let i = stepIndex + 1; i < this.positions.length; i++) {
+                if (!this.steps[i].action) {
+                    this.steps[i] = { pos: this.steps[i].pos, action: 'Fold' };
+                }
+            }
+        }
+
+        // Terminal handling: if there has been a raise and someone calls, we stop (no multiway / no further preflop nodes).
+        if (isCall && raisers.length >= 1) {
+            this.currentStepIndex = this.steps.length; // no active decision
+            this.updateView();
+            return;
+        }
+
+        // Ping-pong handling: on 3-bet+ (2nd raise), bounce back to previous aggressor as the next decision.
+        if (isRaise && raisers.length >= 2) {
+            const previousAggressor = raisers[raisers.length - 2];
+            this.steps.push({ pos: previousAggressor.pos, action: null });
+            this.currentStepIndex = this.steps.length - 1;
+            this.updateView();
+            return;
+        }
+
+        // Otherwise, continue the normal orbit (folds and the first open raise).
+        this.currentStepIndex = stepIndex + 1;
         
         this.updateView();
     }
@@ -882,10 +1052,6 @@ class GTOTreeManager {
             const isActive = index === this.currentStepIndex;
             const stack = this.stacks[pos];
             
-            // Determine Raise Sizing options based on history
-            let raiseLabel = 'Raise 2.5';
-            let raiseValue = 'Raise 2.5';
-            
             // Look at steps BEFORE this one to find last aggressor
             const history = this.steps.slice(0, index).filter(s => s.action && s.action !== 'Fold');
             const lastAggressor = history.reverse().find(a => a.action && (a.action.includes('Raise') || a.action.includes('Allin')));
@@ -896,32 +1062,30 @@ class GTOTreeManager {
                 // Active Step
                 const strategy = this.getStrategyForCurrentState();
                 const canCall = this.hasAnyActionInStrategy(strategy, 'call', 0.01);
-                const canRaise = this.hasAnyActionInStrategy(strategy, 'raise', 0.01);
+                let canRaise = this.hasAnyActionInStrategy(strategy, 'raise', 0.01);
                 const canAllin = this.hasAnyActionInStrategy(strategy, 'raise_all_in', 0.01);
 
                 // Determine raise options from DB "graph"
                 const raiseOptions = this.getRaiseOptionsForActiveStep(index, pos, lastAggressor);
-                // Default label/value: smallest available (or fallback to Raise 2.5 / Raise 3 for SB RFI)
-                if (raiseOptions.length > 0) {
-                    raiseValue = raiseOptions[0];
-                    raiseLabel = raiseOptions[0];
-                } else if (!lastAggressor && pos === 'SB') {
-                    raiseLabel = 'Raise 3';
-                    raiseValue = 'Raise 3';
+                
+                // STRICT MODE: Only allow raises that exist in the DB as next-state scenarios
+                // The user requested: "if we don't have a solution in the database, we shouldn't give that as an action"
+                if (raiseOptions.length === 0) {
+                    canRaise = false; 
                 }
 
-                const allinAction = `Raise ${this.config.stackDepth}`;
-                const raiseAmt = this.parseActionAmount(raiseValue);
-                const isRaiseAllin = raiseAmt !== null && raiseAmt >= (this.config.stackDepth - 0.001);
+                // Check if any raise option is basically all-in
+                // If yes, we don't need a separate generic All-in button if it duplicates a specific Raise
+                const isRaiseAllin = raiseOptions.some(opt => {
+                     const amt = this.parseActionAmount(opt);
+                     return amt !== null && amt >= (this.config.stackDepth - 0.001);
+                });
 
                 // Build action buttons dynamically
                 const raiseButtons = canRaise
-                    ? (raiseOptions.length > 1
-                        ? raiseOptions.map(opt =>
-                            `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${opt}')">${opt}</button>`
-                          ).join('')
-                        : `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${raiseValue}')">${raiseLabel}</button>`
-                      )
+                    ? raiseOptions.map(opt =>
+                        `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${opt}')">${opt}</button>`
+                      ).join('')
                     : '';
 
                 content = `
@@ -929,7 +1093,7 @@ class GTOTreeManager {
                         <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-gray-400 border border-transparent hover:border-gray-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Fold')">Fold</button>
                         ${canCall ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-green-400 font-bold border border-transparent hover:border-green-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Call')">Call</button>` : ''}
                         ${raiseButtons}
-                        ${(canAllin && !isRaiseAllin) ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${allinAction}')">Allin</button>` : ''}
+                        ${(canAllin && !isRaiseAllin) ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Allin ${this.config.stackDepth}')">Allin</button>` : ''}
                     </div>
                 `;
             } else if (action) {

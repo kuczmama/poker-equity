@@ -86,10 +86,26 @@ def _http_get_json(
         try:
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 raw = resp.read()
+                status = getattr(resp, "status", None)
+                content_type = ""
+                try:
+                    content_type = str(resp.headers.get("Content-Type", ""))
+                except Exception:
+                    content_type = ""
+
+                if not raw:
+                    raise FetchError(f"Empty response body (status={status}, content-type={content_type})")
+
                 try:
                     return json.loads(raw.decode("utf-8"))
                 except Exception as e:
-                    raise FetchError(f"Failed to decode JSON from response: {e}") from e
+                    # GTOW sometimes returns HTML/text bodies (rate-limit/WAF/transient) with a 200,
+                    # which will fail JSON decoding. Treat this as transient and retry.
+                    snippet = raw[:300].decode("utf-8", errors="replace")
+                    raise FetchError(
+                        f"Failed to decode JSON from response (status={status}, content-type={content_type}): {e}\n"
+                        f"First 300 bytes:\n{snippet}"
+                    ) from e
         except urllib.error.HTTPError as e:
             last_err = e
             status = getattr(e, "code", None)
@@ -226,6 +242,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout (seconds).")
     parser.add_argument("--max-retries", type=int, default=5, help="Retries on 429/5xx/network hiccups.")
     parser.add_argument(
+        "--start-at",
+        default=None,
+        help="Optional output_file to start at (inclusive). Useful to resume mid-list after an error.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Overwrite existing output files. Default: skip if file exists.",
@@ -282,12 +303,19 @@ def main() -> int:
     headers = _default_headers(bearer_token=bearer, client_id=client_id)
     _ensure_dir(args.out_dir)
 
+    started = args.start_at is None
     for idx, spot in enumerate(cfg["spots"]):
         if not isinstance(spot, dict):
             raise ValueError(f"Spot at index {idx} must be an object.")
 
         output_file, params = _validate_spot(spot)
         out_path = os.path.join(args.out_dir, output_file)
+
+        if not started:
+            if output_file == args.start_at:
+                started = True
+            else:
+                continue
 
         if os.path.exists(out_path) and not args.overwrite:
             print(f"[skip] {output_file} already exists")

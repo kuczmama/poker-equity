@@ -491,6 +491,35 @@ INSTRUCTIONS:
         return "Please use analyzeFullHand() for the new deep analysis.";
     }
 
+    static normalizeHand(handStr) {
+        // e.g. "AhKh" -> "AKs", "AhKd" -> "AKo", "5h5d" -> "55"
+        if (!handStr) return null;
+        const h = handStr.replace(/10/g, 'T').replace(/\s/g, '');
+        if (h.length !== 4) return null; // must be 2 cards, 4 chars e.g. "AsKh"
+        
+        const r1 = h[0];
+        const s1 = h[1];
+        const r2 = h[2];
+        const s2 = h[3];
+        
+        const ranks = 'AKQJT98765432';
+        // Sort by rank index (lower index = higher rank)
+        const i1 = ranks.indexOf(r1);
+        const i2 = ranks.indexOf(r2);
+        
+        if (i1 === -1 || i2 === -1) return null;
+        
+        if (r1 === r2) return r1 + r2; // Pair
+        
+        if (s1 === s2) {
+            // Suited
+            return (i1 < i2 ? r1 + r2 : r2 + r1) + 's';
+        } else {
+            // Offsuit
+            return (i1 < i2 ? r1 + r2 : r2 + r1) + 'o';
+        }
+    }
+
     async analyzeFullHand(rawText, parser, treeManager) {
         if (!this.apiKey) throw new Error('API Key missing');
 
@@ -537,38 +566,64 @@ INSTRUCTIONS:
                         villainPos: vObj ? vObj.pos : 'Unknown', 
                         prevAction: `Raise ${lastRaise.amount}` // This might need normalization
                     };
-                    villainName = lastRaise.player;
                 }
 
                 // If Hero is SB/BB and it's RFI, context is different.
                 
                 // Get Strategy
                 const strat = treeManager.getStrategyForContext(handData.hero.pos, context.villainPos, context.prevAction, context.isRFI);
-                if (strat && strat[treeManager.normalizeHand(handData.hero.handStr)]) {
-                    gtoInfo = JSON.stringify(strat[treeManager.normalizeHand(handData.hero.handStr)]);
+                if (strat && strat[LLMService.normalizeHand(handData.hero.handStr)]) {
+                    gtoInfo = JSON.stringify(strat[LLMService.normalizeHand(handData.hero.handStr)]);
                 }
             } catch (e) { console.warn("GTO lookup failed", e); }
         }
 
         // Get Villain Stats
-        // Find the player who put money in the pot with Hero
-        // Identify "Main Villain" for the hand (who saw flop with hero, or who raised hero)
-        if (!villainName) {
-            // Look for anyone who didn't fold
+        // Find players who put money in the pot with Hero or interacted meaningfully
+        let villains = [];
+        const interactors = handData.players.filter(p => {
+            if (p.name === handData.hero.name) return false;
+            // Did they raise?
+            const raised = preflop.actions.some(a => a.player === p.name && a.type === 'raise');
+            if (raised) return true;
+            // Did they call?
+            const called = preflop.actions.some(a => a.player === p.name && a.type === 'call');
+            if (called) return true;
+            return false;
+        });
+
+        if (interactors.length > 0) {
+            villains = interactors;
+        } else {
+             // Fallback: anyone who didn't fold
             const survivors = handData.players.filter(p => {
                 const acts = preflop.actions.filter(a => a.player === p.name);
                 const last = acts[acts.length-1];
                 return last && last.type !== 'fold' && p.name !== handData.hero.name;
             });
-            if (survivors.length > 0) villainName = survivors[0].name;
+            villains = survivors;
+        }
+        
+        // Fetch stats for all identified villains
+        let villainStatsList = [];
+        if (treeManager && villains.length > 0) {
+            try {
+                const promises = villains.map(async v => {
+                    const s = await treeManager.getVillainStats(v.name);
+                    return { name: v.name, stats: s };
+                });
+                villainStatsList = await Promise.all(promises);
+            } catch (err) {
+                console.error("Error fetching villain stats:", err);
+            }
         }
 
-        if (villainName && treeManager) {
-            villainStats = treeManager.getVillainStats(villainName);
-        }
-
-        const statsStr = villainStats ? 
-            `Villain (${villainName}) Stats: VPIP: ${villainStats.vpip?.toFixed(1)}, PFR: ${villainStats.pfr?.toFixed(1)}, 3B: ${villainStats.three_bet?.toFixed(1)}, WSD: ${villainStats.wsd?.toFixed(1)}` : 
+        const statsStr = villainStatsList.length > 0 ? 
+            villainStatsList.map(v => {
+                const s = v.stats;
+                if (!s) return `Villain (${v.name}): Unknown/No Data`;
+                return `Villain (${v.name}) Stats: VPIP: ${s.vpip?.toFixed(1)}, PFR: ${s.pfr?.toFixed(1)}, 3B: ${s.three_bet?.toFixed(1)}, WSD: ${s.wsd?.toFixed(1)}`;
+            }).join('\n- ') : 
             "Villain Stats: Unknown/Not found in DB";
 
         // Build Street Summaries
