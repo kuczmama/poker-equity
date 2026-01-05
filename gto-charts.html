@@ -246,8 +246,24 @@
     <script src="gto-renderer.js"></script>
     <script src="gto-tree-manager.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-             // Main logic moved to gto-tree-manager.js
+        document.addEventListener('DOMContentLoaded', async () => {
+             // Initialize GTO Tree Manager
+             const renderer = new GTORenderer();
+             const llm = new LLMService();
+             window.treeManager = new GTOTreeManager(renderer, llm);
+             await window.treeManager.init();
+             
+             // Edit Mode Button
+             const editBtn = document.getElementById('edit-mode-btn');
+             if (editBtn) {
+                 editBtn.addEventListener('click', () => window.treeManager.toggleEditMode());
+             }
+             
+             // Save DB Button
+             const saveDbBtn = document.getElementById('save-db-btn');
+             if (saveDbBtn) {
+                 saveDbBtn.addEventListener('click', () => window.treeManager.saveDatabase());
+             }
              
              // Settings Modal Logic
              const modal = document.getElementById('settings-modal');
@@ -309,6 +325,15 @@
 
              analyzeBtn.addEventListener('click', async () => {
                 errorDisplay.classList.add('hidden');
+                
+                if (!window.treeManager) {
+                    const msg = "System not ready: TreeManager not initialized. Check console for script errors.";
+                    console.error(msg);
+                    errorDisplay.textContent = msg;
+                    errorDisplay.classList.remove('hidden');
+                    return;
+                }
+
                 const text = historyInput.value;
                 if(!text) return;
 
@@ -327,7 +352,7 @@
 
                 try {
                     // Use the new centralized Full Hand Analysis
-                    const analysis = await treeManager.llm.analyzeFullHand(text, parser, treeManager);
+                    const analysis = await window.treeManager.llm.analyzeFullHand(text, parser, window.treeManager);
                     
                     // Render Markdown-ish response
                     // Simple formatter since we don't have 'marked' loaded

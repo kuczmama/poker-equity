@@ -38,6 +38,211 @@ class GTOTreeManager {
         this.heroPos = null; 
     }
 
+    renderTreeControls() {
+        const container = document.getElementById('tree-controls');
+        if (!container) return;
+        
+        let html = '';
+        
+        // Render each position as a button group
+        this.steps.forEach((step, index) => {
+            const isActive = index === this.currentStepIndex;
+            const isPast = index < this.currentStepIndex;
+            const isFuture = index > this.currentStepIndex;
+            
+            // Position button styling
+            let posClass = 'px-3 py-2 rounded-t text-xs font-bold transition-all ';
+            if (isActive) {
+                posClass += 'bg-primary text-black';
+            } else if (isPast && step.action) {
+                posClass += 'bg-gray-600 text-white';
+            } else {
+                posClass += 'bg-gray-700 text-gray-400 hover:bg-gray-600';
+            }
+            
+            html += `<div class="flex flex-col min-w-[80px]" data-step="${index}">`;
+            html += `<button class="${posClass}" data-pos="${step.pos}" data-index="${index}">${step.pos}</button>`;
+            
+            // Action buttons for this position
+            html += `<div class="flex flex-col bg-gray-900 rounded-b border border-gray-700 border-t-0">`;
+            
+            if (isActive || (isPast && !step.action)) {
+                // Show available actions
+                const context = this.deriveContext(index);
+                const lastAggressor = this.getActionHistory(index).slice().reverse()
+                    .find(a => a.action?.includes('Raise') || a.action?.includes('Allin'));
+                
+                // Check if facing an all-in (can only fold or call)
+                const facingAllIn = lastAggressor && lastAggressor.action?.includes('Allin');
+                
+                // Fold button (always available)
+                html += `<button class="action-btn px-2 py-1 text-xs hover:bg-gray-700 text-gray-300" data-action="Fold" data-index="${index}">Fold</button>`;
+                
+                // Call/Check button
+                if (context.isRFI) {
+                    // No call for RFI - you're opening, not calling
+                } else {
+                    html += `<button class="action-btn px-2 py-1 text-xs hover:bg-gray-700 text-green-400" data-action="Call" data-index="${index}">Call</button>`;
+                }
+                
+                // Only show raise options if NOT facing an all-in
+                if (!facingAllIn) {
+                    const raiseOptions = this.getRaiseOptionsForActiveStep(index, step.pos, lastAggressor);
+                    
+                    if (raiseOptions.length > 0) {
+                        raiseOptions.forEach(raiseOpt => {
+                            html += `<button class="action-btn px-2 py-1 text-xs hover:bg-gray-700 text-red-400" data-action="${raiseOpt}" data-index="${index}">${raiseOpt}</button>`;
+                        });
+                    } else {
+                        // Default raise option if none found
+                        const defaultRaise = context.isRFI ? 'Raise 2.5' : 'Raise 7.5';
+                        html += `<button class="action-btn px-2 py-1 text-xs hover:bg-gray-700 text-red-400" data-action="${defaultRaise}" data-index="${index}">${defaultRaise}</button>`;
+                    }
+                    
+                    // All-in option (only if not already facing all-in)
+                    html += `<button class="action-btn px-2 py-1 text-xs hover:bg-gray-700 text-red-600" data-action="Allin 100" data-index="${index}">All-In</button>`;
+                }
+            } else if (step.action) {
+                // Show the action that was taken
+                let actionClass = 'text-gray-400';
+                if (step.action.includes('Raise') || step.action.includes('Allin')) actionClass = 'text-red-400';
+                else if (step.action === 'Call') actionClass = 'text-green-400';
+                else if (step.action === 'Fold') actionClass = 'text-gray-500';
+                
+                html += `<div class="px-2 py-1 text-xs ${actionClass}">${step.action}</div>`;
+            }
+            
+            html += '</div></div>';
+        });
+        
+        container.innerHTML = html;
+        
+        // Bind click events
+        container.querySelectorAll('.action-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = e.target.dataset.action;
+                const index = parseInt(e.target.dataset.index);
+                const pos = this.steps[index].pos;
+                this.handleAction(index, pos, action);
+            });
+        });
+        
+        // Bind position click to jump to that step
+        container.querySelectorAll('button[data-pos]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                if (index <= this.currentStepIndex) {
+                    // Allow clicking on past/current positions to navigate
+                    this.currentStepIndex = index;
+                    this.updateView();
+                }
+            });
+        });
+    }
+
+    updateView() {
+        // Re-render tree controls
+        this.renderTreeControls();
+        
+        // Get strategy for current state
+        const strategy = this.getStrategyForCurrentState();
+        
+        // Determine if this is a subset range (facing action vs RFI)
+        const context = this.deriveContext();
+        const isSubsetRange = !context.isRFI;
+        
+        // Update the grid
+        this.renderer.renderGrid('gto-grid-container', strategy, (hand) => {
+            this.onHandClick(hand);
+        }, isSubsetRange);
+        
+        // Update scenario title
+        const titleEl = document.getElementById('current-scenario-title');
+        if (titleEl) {
+            const activeStep = this.steps[this.currentStepIndex];
+            if (context.isRFI) {
+                titleEl.textContent = `${activeStep.pos} RFI (Open Raise)`;
+            } else {
+                titleEl.textContent = `${activeStep.pos} vs ${context.villainPos} ${context.prevAction}`;
+            }
+        }
+        
+        // Setup edit mode handlers if in edit mode
+        if (this.editMode) {
+            this.setupEditModeHandlers();
+        }
+    }
+
+    onHandClick(hand) {
+        if (this.editMode) {
+            this.updateHandStrategy(hand);
+            return;
+        }
+        
+        // Show hand info
+        const infoEl = document.getElementById('hand-info-content');
+        if (!infoEl) return;
+        
+        const strategy = this.getStrategyForCurrentState();
+        const handStrat = strategy[hand];
+        
+        if (!handStrat) {
+            infoEl.innerHTML = `<p class="text-gray-400">${hand}: Not in range (Fold 100%)</p>`;
+            return;
+        }
+        
+        let html = `<h3 class="text-lg font-bold text-white mb-2">${hand}</h3>`;
+        html += '<div class="space-y-1">';
+        
+        const colors = {
+            'fold': 'text-blue-400',
+            'call': 'text-green-400',
+            'raise': 'text-red-400',
+            'raise_all_in': 'text-red-600'
+        };
+        
+        for (const [action, freq] of Object.entries(handStrat)) {
+            const pct = (freq * 100).toFixed(1);
+            const colorClass = colors[action] || 'text-gray-300';
+            html += `<div class="flex justify-between"><span class="${colorClass}">${action}</span><span>${pct}%</span></div>`;
+        }
+        
+        html += '</div>';
+        infoEl.innerHTML = html;
+    }
+
+    setupEditModeHandlers() {
+        // Setup painting handlers for edit mode
+        const container = document.getElementById('gto-grid-container');
+        if (!container) return;
+        
+        container.querySelectorAll('.gto-cell').forEach(cell => {
+            cell.addEventListener('mousedown', () => {
+                this.isPainting = true;
+                const hand = cell.dataset.hand;
+                if (hand) this.updateHandStrategy(hand);
+            });
+            
+            cell.addEventListener('mouseenter', () => {
+                if (this.isPainting) {
+                    const hand = cell.dataset.hand;
+                    if (hand) this.updateHandStrategy(hand);
+                }
+            });
+        });
+        
+        document.addEventListener('mouseup', () => {
+            this.isPainting = false;
+        });
+        
+        // Setup palette tool selection
+        document.querySelectorAll('.palette-tool').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.setTool(btn.dataset.tool);
+            });
+        });
+    }
+
     async init() {
         this.renderTreeControls();
         this.updateView();
@@ -74,7 +279,9 @@ class GTOTreeManager {
         // We use it to mirror the exact bet sizing flow, instead of guessing from pot_type or numeric heuristics.
         const res = await fetch('data/import_ranges/gtowizard_spots.7max.preflop.headsup.json');
         if (!res.ok) {
-            throw new Error(`Failed to load GTOW spot index: ${res.status} ${res.statusText}`);
+            // Optional: Spot index might not exist if using pure custom DB
+            console.log("GTOW spot index not found (optional for custom DB).");
+            return;
         }
         const data = await res.json();
         if (!data || !Array.isArray(data.spots)) {
@@ -354,25 +561,18 @@ class GTOTreeManager {
         const heroCandidates = this.getHeroPosCandidates(heroPos);
         const villainCandidates = isRFI ? ['Blinds'] : this.getVillainPosCandidates(villainPos);
 
+        // Try to find scenario, preferring Cash (GTO Wizard) data over CFR data
         let scenarioId = null;
-        if (isRFI) {
-            const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = 'Blinds' AND prev_action = 'Fold'";
-            for (const dbHero of heroCandidates) {
-                const stmt = this.db.prepare(query);
-                stmt.bind({ ':hero': dbHero });
-                if (stmt.step()) {
-                    scenarioId = stmt.getAsObject().id;
-                    stmt.free();
-                    break;
-                }
-                stmt.free();
-            }
-        } else {
-            const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain AND prev_action = :prev";
-            for (const dbHero of heroCandidates) {
-                for (const dbVillain of villainCandidates) {
+        const variants = ['Cash', 'CFR']; // Priority order
+        
+        for (const variant of variants) {
+            if (scenarioId) break;
+            
+            if (isRFI) {
+                const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = 'Blinds' AND prev_action = 'Fold' AND (variant = :variant OR variant IS NULL)";
+                for (const dbHero of heroCandidates) {
                     const stmt = this.db.prepare(query);
-                    stmt.bind({ ':hero': dbHero, ':villain': dbVillain, ':prev': prevAction });
+                    stmt.bind({ ':hero': dbHero, ':variant': variant });
                     if (stmt.step()) {
                         scenarioId = stmt.getAsObject().id;
                         stmt.free();
@@ -380,7 +580,21 @@ class GTOTreeManager {
                     }
                     stmt.free();
                 }
-                if (scenarioId) break;
+            } else {
+                const query = "SELECT id FROM scenarios WHERE hero_pos = :hero AND villain_pos = :villain AND prev_action = :prev AND (variant = :variant OR variant IS NULL)";
+                for (const dbHero of heroCandidates) {
+                    for (const dbVillain of villainCandidates) {
+                        const stmt = this.db.prepare(query);
+                        stmt.bind({ ':hero': dbHero, ':villain': dbVillain, ':prev': prevAction, ':variant': variant });
+                        if (stmt.step()) {
+                            scenarioId = stmt.getAsObject().id;
+                            stmt.free();
+                            break;
+                        }
+                        stmt.free();
+                    }
+                    if (scenarioId) break;
+                }
             }
         }
 
@@ -487,16 +701,61 @@ class GTOTreeManager {
     }
 
     getRaiseOptionsForActiveStep(stepIndex, pos, lastAggressor) {
-        // Mirror the imported GTOWizard bet-sizing flow using the spot index (data/import_ranges/gtowizard_spots.7max.preflop.json).
-        // This avoids accidentally mixing open sizes + 3bet sizes + 4bet sizes in the same menu.
-        //
-        // At each decision node, GTOW effectively offers one canonical non-allin raise size.
-        // We derive that size from the "next" spot file in the chain:
-        // - No raises yet: opener size comes from "*_vs_<OPENER>_OPEN.json"
-        // - Facing open (1 raise): 3bet size comes from "<OPENER>_vs_<HERO>_3BET.json"
-        // - Facing 3bet (2 raises): 4bet size comes from "<3BETTOR>_vs_<HERO>_4BET.json"
-        // - etc.
-
+        // First check custom DB for explicit raise options from this spot
+        // This takes precedence over GTOWizard heuristics
+        if (this.db) {
+            // New logic: Check ANY scenario where hero_pos is the NEXT player in rotation
+            // and prev_action corresponds to a raise from US (pos).
+            // But we are trying to find buttons for US (pos).
+            // So we want to find raises R such that:
+            // "Scenario: NextPlayer vs US (US Raise R)" exists.
+            
+            // This confirms that if we Raise R, the next player has a node in the DB.
+            
+            // 1. Who is next?
+            // In a ring game, next player is just next in array.
+            const nextPos = this.getNextPosInOrbit(pos);
+            const nextDbPos = this.mapPositionToDB(nextPos);
+            
+            // 2. Who are we?
+            const myDbPos = this.mapPositionToDB(pos);
+            
+            // 3. Query: Find all "Raise X" actions that appear as 'prev_action' 
+            // in a scenario where villain_pos = ME.
+            // (Note: villain_pos in DB scenarios is the aggressor we are facing).
+            
+            // Wait, this logic assumes the DB has nodes for EVERY player reacting to my raise.
+            // Yes, that is how the export script works (it traverses all paths).
+            
+            const query = `
+                SELECT DISTINCT prev_action 
+                FROM scenarios 
+                WHERE villain_pos = :me 
+                  AND (prev_action LIKE 'Raise%' OR prev_action LIKE 'Allin%')
+            `;
+            
+            const stmt = this.db.prepare(query);
+            stmt.bind({ ':me': myDbPos });
+            
+            const opts = [];
+            while(stmt.step()) {
+                const row = stmt.getAsObject();
+                opts.push(row.prev_action);
+            }
+            stmt.free();
+            
+            // If we found specific options in our DB, return them!
+            if (opts.length > 0) {
+                // Sort by amount
+                return opts.sort((a, b) => {
+                    const vA = this.parseActionAmount(a) || 0;
+                    const vB = this.parseActionAmount(b) || 0;
+                    return vA - vB;
+                });
+            }
+        }
+        
+        // Fallback to GTOWizard file heuristics if no custom DB options found
         const history = this.getActionHistory(stepIndex);
         const raises = history.filter(s => s.action.includes('Raise') || s.action.includes('Allin'));
         const raiseCount = raises.length;
@@ -695,10 +954,44 @@ class GTOTreeManager {
         const isRaise = action.includes('Raise') || action.includes('Allin');
         const isCall = action.includes('Call');
 
-        // Ensure we always show a full 7-max orbit (coinpoker display), even though the underlying data is heads-up.
-        while (this.steps.length < this.positions.length) {
+        // Ensure we always show a full 7-max orbit (coinpoker display)
+        // We extend the orbit if necessary, but we don't necessarily want to force HU logic anymore.
+        
+        // Find current max step index to know where we are in the orbit
+        // Standard full orbit is 7 steps.
+        const fullOrbitLength = this.positions.length;
+        
+        // If we are still within the first orbit, we can just fill out the remaining positions
+        if (this.steps.length < fullOrbitLength) {
+             while (this.steps.length < fullOrbitLength) {
             const nextPos = this.positions[this.steps.length];
             this.steps.push({ pos: nextPos, action: null });
+            }
+        } else {
+            // We are extending beyond the first orbit (e.g. 3-bet pot)
+            // We need to determine who acts next.
+            // Normally, next actor is next position in orbit who hasn't folded.
+            // But for simple "ping pong" logic or just sequential logic:
+            
+            // If Raise/Call, we need to find the next player in the rotation.
+            // Simplest logic: Check next index in positions array (wrapping around)
+            // Check if that player has folded?
+            // For now, let's just append the NEXT position in the standard sequence.
+            
+            // BUT: We need to respect the table order.
+            // pos = 'UTG' -> next is 'LJ'.
+            const nextPosName = this.getNextPosInOrbit(pos);
+            // In a real game we skip folded players.
+            // Here, we can look at previous steps for that position to see if they folded.
+            // But steps is linear history.
+            // We should find the next position in `this.positions` that does NOT have a 'Fold' in the history?
+            // Actually, if they folded, they are out.
+            
+            // NOTE: Multi-way logic is complex. 
+            // For "Call" to work in Ring Game:
+            // UTG Raise -> LJ Call -> HJ Decision.
+            // Current code pushed everyone else to Fold if there was a call.
+            // I REMOVED that block. Now we just fall through to "continue normal orbit".
         }
 
         // Force any "skipped" earlier positions to fold (so we don't visually compress the line).
@@ -709,532 +1002,50 @@ class GTOTreeManager {
             }
         }
 
-        // Determine how many raises have occurred so far (heads-up spot graph assumption).
-        // Your imported GTOWizard preflop set is heads-up per pairing, so once a second raise occurs
-        // (3-bet or higher), action should immediately bounce back to the previous aggressor and we
-        // should NOT continue the orbit to later seats (no multiway modeling).
+        // --- NEW RING GAME LOGIC ---
+        // Instead of forcing HU, we just advance the cursor.
+        // But if it's a 3-bet (Re-Raise), we typically want to jump back to the original raiser?
+        // Or do we let the players in between act (Cold 4-bet)?
+        // GTO charts usually assume HU after 3-bet?
+        // Let's stick to:
+        // 1. If Open Raise -> Next player acts. (Normal Orbit)
+        // 2. If 3-Bet (Raise vs Raise) -> Jump back to Original Raiser (HU assumption usually, or just next active player).
+        //
+        // Let's keep the "Ping Pong" logic only if it's strictly HU?
+        // "If isRaise and raisers.length >= 2" -> This implies 3-bet.
+        
         const activeSteps = this.steps.filter(s => s.action && s.action !== 'Fold');
         const raisers = activeSteps.filter(s => s.action.includes('Raise') || s.action.includes('Allin'));
 
-        // If someone takes a non-fold action facing a raise (call or raise), we are now in a heads-up branch.
-        // Force all later unopened seats in the first orbit to fold so the visual line stays 7-max but deterministic.
-        if ((isCall || isRaise) && raisers.length >= 1) {
-            for (let i = stepIndex + 1; i < this.positions.length; i++) {
-                if (!this.steps[i].action) {
-                    this.steps[i] = { pos: this.steps[i].pos, action: 'Fold' };
-                }
-            }
-        }
-
-        // Terminal handling: if there has been a raise and someone calls, we stop (no multiway / no further preflop nodes).
-        if (isCall && raisers.length >= 1) {
-            this.currentStepIndex = this.steps.length; // no active decision
-            this.updateView();
-            return;
-        }
-
-        // Ping-pong handling: on 3-bet+ (2nd raise), bounce back to previous aggressor as the next decision.
         if (isRaise && raisers.length >= 2) {
+             // 3-Bet or 4-Bet scenario.
+             // We jump back to the PREVIOUS aggressor.
             const previousAggressor = raisers[raisers.length - 2];
+             
+             // Check if we already added this step?
+             // steps array is linear. We push a new step.
             this.steps.push({ pos: previousAggressor.pos, action: null });
             this.currentStepIndex = this.steps.length - 1;
-            this.updateView();
-            return;
+        } else {
+            // Normal sequential action (Open Raise, Calls, Folds)
+            // Just move to next step in the array.
+            // If we are at end of array, we might need to append next player?
+            // "Orbit" logic handles filling the array up to 7 initially.
+            // If we are at index 6 (BB) and BB calls/raises?
+            // If BB Raises vs UTG Open -> Back to UTG (handled by Ping Pong above).
+            // If BB Calls? Action closes. Hand ends.
+            
+            // Check for closing action?
+            // If (Call) and (Raisers > 0) and (We are Big Blind or closing the betting)?
+            // For charts, we usually stop at the call.
+            
+            if (this.currentStepIndex < this.steps.length - 1) {
+                 this.currentStepIndex = stepIndex + 1;
+            } else {
+                 // End of line.
+            }
         }
-
-        // Otherwise, continue the normal orbit (folds and the first open raise).
-        this.currentStepIndex = stepIndex + 1;
         
         this.updateView();
-    }
-
-    resetTo(stepIndex) {
-        // Just change the focus to the clicked step, allowing re-selection
-        this.currentStepIndex = stepIndex;
-        // We don't truncate yet; truncation happens when an action is selected.
-        this.updateView();
-    }
-
-    // --- Copy/Paste Logic ---
-    copyCurrentRange() {
-        const strategy = this.getStrategyForCurrentState();
-        if (Object.keys(strategy).length === 0) {
-            alert("No range to copy!");
-            return;
-        }
-        localStorage.setItem('poker_copied_range', JSON.stringify(strategy));
-        const btn = document.getElementById('copy-range-btn');
-        if(btn) {
-            const original = btn.textContent;
-            btn.textContent = '✅';
-            setTimeout(() => btn.textContent = original, 1000);
-        }
-    }
-
-    pasteRange() {
-        if (!this.editMode) {
-            alert("Please enable Edit Mode (✏️) to paste ranges.");
-            return;
-        }
-        
-        const raw = localStorage.getItem('poker_copied_range');
-        if (!raw) {
-            alert("Clipboard empty!");
-            return;
-        }
-        
-        try {
-            const strategy = JSON.parse(raw);
-            const activeStep = this.steps[this.currentStepIndex];
-            const activePos = activeStep.pos;
-            const context = this.deriveContext();
-            const scenarioId = this.getOrCreateScenarioId(activePos, context);
-            
-            this.db.exec("BEGIN TRANSACTION");
-            const stmt = this.db.prepare("INSERT OR REPLACE INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)");
-            for (const [hand, freqs] of Object.entries(strategy)) {
-                stmt.run([scenarioId, hand, JSON.stringify(freqs)]);
-            }
-            stmt.free();
-            this.db.exec("COMMIT");
-            
-            this.debouncedSave();
-            this.updateView();
-            
-            const btn = document.getElementById('paste-range-btn');
-            if(btn) {
-                const original = btn.textContent;
-                btn.textContent = '✅';
-                setTimeout(() => btn.textContent = original, 1000);
-            }
-        } catch (e) {
-            console.error("Paste failed", e);
-            alert("Failed to paste range: " + e.message);
-        }
-    }
-
-    async handleImageImport(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        try {
-            const strategy = await this.processRangeImage(file);
-            
-            // Save to DB
-            const activeStep = this.steps[this.currentStepIndex];
-            const activePos = activeStep.pos;
-            const context = this.deriveContext();
-            const scenarioId = this.getOrCreateScenarioId(activePos, context);
-
-            this.db.exec("BEGIN TRANSACTION");
-            const stmt = this.db.prepare("INSERT OR REPLACE INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)");
-            for (const [hand, freqs] of Object.entries(strategy)) {
-                stmt.run([scenarioId, hand, JSON.stringify(freqs)]);
-            }
-            stmt.free();
-            this.db.exec("COMMIT");
-            
-            this.debouncedSave();
-            this.updateView();
-            
-            alert("Range imported successfully! Don't forget to Save Database (💾) if you want to keep changes.");
-
-        } catch (err) {
-            console.error("Image Import Failed", err);
-            alert("Import failed: " + err.message);
-        }
-        
-        // Clear input so same file can be selected again
-        e.target.value = '';
-    }
-
-    processRangeImage(file) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                
-                const strategy = {};
-                const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
-                
-                // --- Auto-Crop Heuristic ---
-                // 1. Assume the Grid is a perfect Square (13x13).
-                // 2. Assume the Grid spans the full WIDTH of the image.
-                // 3. Assume any extra Height is the toolbar at the TOP.
-                
-                let gridSide = img.width;
-                let startX = 0;
-                let startY = 0;
-
-                // If image is taller than it is wide (Portrait/Toolbar on top)
-                if (img.height > img.width) {
-                    // The grid is at the bottom. The header takes up the difference.
-                    startY = img.height - img.width;
-                }
-                
-                const cellW = gridSide / 13;
-                const cellH = gridSide / 13;
-                
-                for(let r=0; r<13; r++) {
-                    for(let c=0; c<13; c++) {
-                        // Sample the center of each cell (safest point)
-                        const cx = startX + (c * cellW) + (cellW / 2);
-                        const cy = startY + (r * cellH) + (cellH / 2);
-                        
-                        // Bounds check
-                        if (cx < 0 || cx >= img.width || cy < 0 || cy >= img.height) continue;
-
-                        const p = ctx.getImageData(cx, cy, 1, 1).data; 
-                        const red = p[0], green = p[1], blue = p[2];
-                        const total = red + green + blue;
-
-                        let freqs = { fold: 1.0 }; // Default to fold
-
-                        // Skip dark colors (borders/text)
-                        if (total > 30) {
-                            const rP = red / total;
-                            const gP = green / total;
-                            const bP = blue / total;
-                            
-                            // Dominant Color Logic
-                            if (rP > 0.50) freqs = { raise: 1.0 };       // Red -> Raise
-                            else if (gP > 0.50) freqs = { call: 1.0 };  // Green -> Call
-                            else if (bP > 0.50) freqs = { fold: 1.0 };  // Blue -> Fold
-                            else {
-                                // Mixed Strategy (blended colors)
-                                freqs = { raise: rP, call: gP, fold: bP };
-                            }
-                        }
-                        
-                        // Map coordinates to Hand (e.g., 0,0 -> AA)
-                        const r1 = ranks[r];
-                        const r2 = ranks[c];
-                        let hand;
-                        if (r === c) hand = r1 + r2;       // Pair
-                        else if (r < c) hand = r1 + r2 + 's'; // Suited
-                        else hand = r2 + r1 + 'o';        // Offsuit
-                        
-                        strategy[hand] = freqs;
-                    }
-                }
-                resolve(strategy);
-            };
-            img.onerror = reject;
-            img.src = URL.createObjectURL(file);
-        });
-    }
-
-    importPreviousRange() {
-        if (!this.editMode) {
-            alert("Please enable Edit Mode (✏️) to import ranges.");
-            return;
-        }
-
-        const activeStep = this.steps[this.currentStepIndex];
-        const activePos = activeStep.pos;
-
-        // Find the LAST step where this player acted
-        // Iterate backwards from current step - 1
-        let prevStepIndex = -1;
-        for (let i = this.currentStepIndex - 1; i >= 0; i--) {
-            if (this.steps[i].pos === activePos) {
-                prevStepIndex = i;
-                break;
-            }
-        }
-
-        if (prevStepIndex === -1) {
-            alert(`No previous action found for ${activePos}. Cannot import range.`);
-            return;
-        }
-
-        // Get context and strategy for that previous step
-        const prevContext = this.deriveContext(prevStepIndex);
-        const oldStrategy = this.getStrategyForContext(activePos, prevContext.villainPos, prevContext.prevAction, prevContext.isRFI);
-
-        if (Object.keys(oldStrategy).length === 0) {
-            alert("Previous strategy is empty/undefined.");
-            return;
-        }
-
-        // Transform Strategy
-        const newStrategy = {};
-        for (const [hand, freqs] of Object.entries(oldStrategy)) {
-            const foldFreq = freqs.fold || 0;
-            const activeFreq = 1.0 - foldFreq;
-
-            if (foldFreq > 0.99) {
-                // Was 100% Fold -> Now 100% Out
-                // We can either delete it or set out_of_range explicitly. 
-                // Setting explicitly ensures it paints black.
-                // Actually, if we delete it, it paints black IF isSubsetRange is true.
-                // But explicitly setting it allows mixing.
-                // Let's set it explicitly if we want to support mixed "Out".
-                // But wait, "delete" tool deletes row.
-                // If row deleted, renderer checks "isSubsetRange".
-                // So if we just don't add it to newStrategy, it will be deleted from DB?
-                // No, we need to overwrite the DB for the CURRENT scenario.
-                // So we construct newStrategy map, and then we need to apply it.
-                // If we omit a hand from newStrategy that IS in oldStrategy, that's fine for construction.
-                // But when saving to DB, we should probably clear the current scenario first or use Replace.
-                
-                // Let's stick to using 'out_of_range' key if we want to be explicit, 
-                // OR rely on the renderer's "missing = black" logic.
-                // Renderer logic: if (strategy) { ... } else { if isSubsetRange ... black }
-                // So if we don't save the hand, it will be black.
-                // So we just SKIP adding it to newStrategy?
-                // Yes.
-                continue; 
-            } else if (activeFreq > 0.99) {
-                // Was 100% Raise/Call -> Now 100% Active (Default Fold?)
-                // User didn't specify what active part becomes. Default to Fold (Blue).
-                newStrategy[hand] = { fold: 1.0 };
-            } else {
-                // Mixed Fold/Active
-                // e.g. Fold 0.5, Raise 0.5
-                // New: Out 0.5, Fold 0.5
-                newStrategy[hand] = {
-                    out_of_range: foldFreq,
-                    fold: activeFreq
-                };
-            }
-        }
-
-        // Save to DB
-        const currentContext = this.deriveContext();
-        const scenarioId = this.getOrCreateScenarioId(activePos, currentContext);
-
-        this.db.exec("BEGIN TRANSACTION");
-        
-        // Clear existing strategy for this scenario first to ensure clean state?
-        // Yes, because "missing" means "out/black".
-        this.db.run("DELETE FROM strategies WHERE scenario_id = ?", [scenarioId]);
-
-        const stmt = this.db.prepare("INSERT INTO strategies (scenario_id, hand, frequencies) VALUES (?, ?, ?)");
-        
-        for (const [hand, freqs] of Object.entries(newStrategy)) {
-            stmt.run([scenarioId, hand, JSON.stringify(freqs)]);
-        }
-        stmt.free();
-        this.db.exec("COMMIT");
-
-        this.debouncedSave();
-        this.updateView();
-        
-        // Feedback
-        const btn = document.getElementById('import-prev-btn');
-        if(btn) {
-            const original = btn.textContent;
-            btn.textContent = '✅';
-            setTimeout(() => btn.textContent = original, 1000);
-        }
-    }
-
-    // --- Rendering ---
-    renderTreeControls() {
-        const container = document.getElementById('tree-controls');
-        if (!container) return;
-
-        // Check for any raises to determine if BB should be hidden
-        const hasRaise = this.steps.some(s => s.action && (s.action.includes('Raise') || s.action.includes('Allin')));
-        
-        container.innerHTML = this.steps.map((step, index) => {
-            const { pos, action } = step;
-            
-            // Hide BB if it's the BB step (index 6 in standard config) and no action before it
-            // Only strictly for the "First Pass" BB.
-            if (pos === 'BB' && index === 6 && !hasRaise) return '';
-
-            const isActive = index === this.currentStepIndex;
-            const stack = this.stacks[pos];
-            
-            // Look at steps BEFORE this one to find last aggressor
-            const history = this.steps.slice(0, index).filter(s => s.action && s.action !== 'Fold');
-            const lastAggressor = history.reverse().find(a => a.action && (a.action.includes('Raise') || a.action.includes('Allin')));
-
-            let content = '';
-            
-            if (isActive) {
-                // Active Step
-                const strategy = this.getStrategyForCurrentState();
-                const canCall = this.hasAnyActionInStrategy(strategy, 'call', 0.01);
-                let canRaise = this.hasAnyActionInStrategy(strategy, 'raise', 0.01);
-                const canAllin = this.hasAnyActionInStrategy(strategy, 'raise_all_in', 0.01);
-
-                // Determine raise options from DB "graph"
-                const raiseOptions = this.getRaiseOptionsForActiveStep(index, pos, lastAggressor);
-                
-                // STRICT MODE: Only allow raises that exist in the DB as next-state scenarios
-                // The user requested: "if we don't have a solution in the database, we shouldn't give that as an action"
-                if (raiseOptions.length === 0) {
-                    canRaise = false; 
-                }
-
-                // Check if any raise option is basically all-in
-                // If yes, we don't need a separate generic All-in button if it duplicates a specific Raise
-                const isRaiseAllin = raiseOptions.some(opt => {
-                     const amt = this.parseActionAmount(opt);
-                     return amt !== null && amt >= (this.config.stackDepth - 0.001);
-                });
-
-                // Build action buttons dynamically
-                const raiseButtons = canRaise
-                    ? raiseOptions.map(opt =>
-                        `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-400 font-bold border border-transparent hover:border-red-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', '${opt}')">${opt}</button>`
-                      ).join('')
-                    : '';
-
-                content = `
-                    <div class="space-y-1 relative z-10">
-                        <button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-gray-400 border border-transparent hover:border-gray-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Fold')">Fold</button>
-                        ${canCall ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-green-400 font-bold border border-transparent hover:border-green-500 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Call')">Call</button>` : ''}
-                        ${raiseButtons}
-                        ${(canAllin && !isRaiseAllin) ? `<button class="w-full text-left text-xs py-1 px-2 hover:bg-gray-700 bg-gray-900/50 rounded text-red-600 font-bold border border-transparent hover:border-red-700 transition-colors" onclick="treeManager.handleAction(${index}, '${pos}', 'Allin ${this.config.stackDepth}')">Allin</button>` : ''}
-                    </div>
-                `;
-            } else if (action) {
-                // Completed Step
-                let colorClass = 'text-gray-400'; 
-                if (action.includes('Raise')) colorClass = 'text-red-400';
-                if (action.includes('Call')) colorClass = 'text-green-400';
-                const amt = this.parseActionAmount(action);
-                if (amt !== null && amt >= (this.config.stackDepth - 0.001)) colorClass = 'text-red-600';
-                
-                content = `<div class="text-sm font-bold ${colorClass} mt-2">${action}</div>`;
-            } else {
-                content = `<div class="text-xs text-gray-600 mt-2">Waiting...</div>`;
-            }
-
-            return `
-                <div class="flex-1 min-w-[80px] bg-gray-800 border ${isActive ? 'border-primary ring-1 ring-primary' : 'border-gray-700'} rounded p-2 flex flex-col gap-1 ${isActive ? '' : 'cursor-pointer'}" onclick="${isActive ? '' : `treeManager.resetTo(${index})`}">
-                    <div class="flex justify-between items-center border-b border-gray-700 pb-1">
-                        <span class="font-bold text-sm text-gray-200">${pos}</span>
-                        <span class="text-xs text-gray-500">${stack}bb</span>
-                    </div>
-                    ${content}
-                </div>
-            `;
-        }).join('');
-    }
-
-    updateView() {
-        this.renderTreeControls();
-
-        const activeStep = this.steps[this.currentStepIndex];
-        const activePos = activeStep ? activeStep.pos : null;
-        const strategy = this.getStrategyForCurrentState();
-        
-        // Determine if this is a subset range (player has acted previously)
-        const rawHistory = this.steps.slice(0, this.currentStepIndex);
-        const hasActedPreviously = rawHistory.some(s => s.pos === activePos && s.action && s.action !== 'None');
-
-        this.renderer.renderGrid('gto-grid-container', strategy, (hand) => {
-            if (this.editMode) {
-                this.updateHandStrategy(hand);
-            } else {
-                this.selectHand(hand, strategy);
-            }
-        }, hasActedPreviously);
-
-        const titleEl = document.getElementById('current-scenario-title');
-        if (titleEl && activePos) {
-            const history = this.getActionHistory().map(a => `${a.pos} ${a.action}`).join(', ');
-            titleEl.innerHTML = `
-                <span class="text-primary">${activePos}</span> Decision 
-                <span class="text-xs font-normal text-gray-500 block">${history || 'RFI Strategy'}</span>
-                ${this.editMode ? '<span class="text-yellow-400 text-xs font-bold">[EDIT MODE] Click hands to cycle</span>' : ''}
-            `;
-        }
-    }
-
-    selectHand(hand, strategy) {
-        const data = strategy[hand];
-        const infoPanel = document.getElementById('hand-info-content');
-        if (infoPanel) {
-            infoPanel.innerHTML = `
-                <h3 class="text-xl font-bold mb-2">${hand}</h3>
-                <div class="space-y-2">
-                    ${this.formatFrequencies(data)}
-                </div>
-            `;
-        }
-        
-        if (document.getElementById('auto-analyze')?.checked) {
-             const activeStep = this.steps[this.currentStepIndex];
-             const context = {
-                scenarioName: this.getActionHistory().map(a => a.pos).join('_') + `_to_${activeStep.pos}`,
-                heroPos: activeStep.pos,
-                hand: hand,
-                strategy: data
-            };
-            this.llm.analyze(context).then(res => {
-                const out = document.getElementById('coach-response');
-                if(out) out.innerHTML = res.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
-            });
-        }
-    }
-
-    formatFrequencies(freqs) {
-        if (!freqs) return 'Fold 100%';
-        const colors = this.renderer.colors;
-        return Object.entries(freqs)
-            .sort(([,a], [,b]) => b - a)
-            .map(([action, val]) => `
-                <div class="flex justify-between text-sm">
-                    <span class="capitalize text-gray-300">${action.replace('_', ' ')}</span>
-                    <span class="font-mono font-bold">${(val * 100).toFixed(1)}%</span>
-                </div>
-                <div class="w-full bg-gray-700 h-2 rounded mt-1">
-                    <div class="h-full rounded" style="width: ${val * 100}%; background-color: ${colors[action] || '#fff'}"></div>
-                </div>
-            `).join('');
     }
 }
-
-// Global instance
-let treeManager;
-
-document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('tree-controls') || document.getElementById('gto-grid-container')) {
-        const renderer = new GTORenderer();
-        const llm = new LLMService();
-        
-        treeManager = new GTOTreeManager(renderer, llm);
-        window.treeManager = treeManager;
-        treeManager.init();
-        
-        const editBtn = document.getElementById('edit-mode-btn');
-        if (editBtn) editBtn.addEventListener('click', () => treeManager.toggleEditMode());
-        
-        const saveBtn = document.getElementById('save-db-btn');
-        if (saveBtn) saveBtn.addEventListener('click', () => treeManager.saveDatabase());
-
-        const copyBtn = document.getElementById('copy-range-btn');
-        if (copyBtn) copyBtn.addEventListener('click', () => treeManager.copyCurrentRange());
-        
-        const pasteBtn = document.getElementById('paste-range-btn');
-        if (pasteBtn) pasteBtn.addEventListener('click', () => treeManager.pasteRange());
-
-        const importBtn = document.getElementById('import-prev-btn');
-        if (importBtn) importBtn.addEventListener('click', () => treeManager.importPreviousRange());
-
-        const importImgBtn = document.getElementById('import-img-btn');
-        const importImgInput = document.getElementById('import-img-input');
-        if (importImgBtn && importImgInput) {
-            importImgBtn.addEventListener('click', () => importImgInput.click());
-            importImgInput.addEventListener('change', (e) => treeManager.handleImageImport(e));
-        }
-
-        const tools = document.querySelectorAll('.palette-tool');
-        tools.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const tool = e.target.dataset.tool;
-                treeManager.setTool(tool);
-            });
-        });
-    }
-});
