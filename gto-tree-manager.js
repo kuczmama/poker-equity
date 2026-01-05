@@ -194,17 +194,44 @@ class GTOTreeManager {
         let html = `<h3 class="text-lg font-bold text-white mb-2">${hand}</h3>`;
         html += '<div class="space-y-1">';
         
-        const colors = {
-            'fold': 'text-blue-400',
-            'call': 'text-green-400',
-            'raise': 'text-red-400',
-            'raise_all_in': 'text-red-600'
+        // Get color class for any action (including granular raises)
+        const getColorClass = (action) => {
+            if (action === 'fold') return 'text-blue-400';
+            if (action === 'call') return 'text-green-400';
+            if (action === 'raise_all_in' || action === 'all_in') return 'text-red-600';
+            if (action.startsWith('raise')) return 'text-red-400';
+            return 'text-gray-300';
         };
         
-        for (const [action, freq] of Object.entries(handStrat)) {
+        // Format action name for display
+        const formatAction = (action) => {
+            if (action.startsWith('raise_')) {
+                const size = action.replace('raise_', '');
+                if (size === 'all_in') return 'All-In';
+                return `Raise ${size}`;
+            }
+            return action.charAt(0).toUpperCase() + action.slice(1);
+        };
+        
+        // Sort actions: fold, call, raises (by size), all-in
+        const sortedActions = Object.entries(handStrat).sort((a, b) => {
+            const order = { 'fold': 0, 'call': 1, 'raise_all_in': 100, 'all_in': 100 };
+            const getOrder = (action) => {
+                if (order[action] !== undefined) return order[action];
+                if (action.startsWith('raise_')) {
+                    const size = parseFloat(action.replace('raise_', ''));
+                    return isNaN(size) ? 50 : 10 + size;
+                }
+                return 50;
+            };
+            return getOrder(a[0]) - getOrder(b[0]);
+        });
+        
+        for (const [action, freq] of sortedActions) {
             const pct = (freq * 100).toFixed(1);
-            const colorClass = colors[action] || 'text-gray-300';
-            html += `<div class="flex justify-between"><span class="${colorClass}">${action}</span><span>${pct}%</span></div>`;
+            const colorClass = getColorClass(action);
+            const displayName = formatAction(action);
+            html += `<div class="flex justify-between"><span class="${colorClass}">${displayName}</span><span>${pct}%</span></div>`;
         }
         
         html += '</div>';
@@ -561,9 +588,9 @@ class GTOTreeManager {
         const heroCandidates = this.getHeroPosCandidates(heroPos);
         const villainCandidates = isRFI ? ['Blinds'] : this.getVillainPosCandidates(villainPos);
 
-        // Try to find scenario, preferring Cash (GTO Wizard) data over CFR data
+        // Try to find scenario, preferring CFR data (native 7-max) over Cash (GTO Wizard 9-max adapted)
         let scenarioId = null;
-        const variants = ['Cash', 'CFR']; // Priority order
+        const variants = ['CFR', 'Cash']; // Priority order: CFR first, GTO Wizard as fallback
         
         for (const variant of variants) {
             if (scenarioId) break;
@@ -701,31 +728,41 @@ class GTOTreeManager {
     }
 
     getRaiseOptionsForActiveStep(stepIndex, pos, lastAggressor) {
+        // Determine betting context to filter appropriate raise sizes
+        const history = this.getActionHistory(stepIndex);
+        const raises = history.filter(s => s.action?.includes('Raise') || s.action?.includes('Allin'));
+        const raiseCount = raises.length;
+        
+        // Define contextually appropriate size ranges (in BB)
+        // These match the CFR PREFLOP_RAISE_SIZES categories
+        let minSize = 0;
+        let maxSize = 100;
+        
+        if (raiseCount === 0) {
+            // RFI (open raise): 2-4bb
+            minSize = 2;
+            maxSize = 4;
+        } else if (raiseCount === 1) {
+            // 3-bet: 6-16bb
+            minSize = 6;
+            maxSize = 16;
+        } else if (raiseCount === 2) {
+            // 4-bet: 18-25bb
+            minSize = 18;
+            maxSize = 25;
+        } else if (raiseCount === 3) {
+            // 5-bet: 25-40bb
+            minSize = 25;
+            maxSize = 40;
+        }
+        // 6bet+ is usually all-in
+        
         // First check custom DB for explicit raise options from this spot
         // This takes precedence over GTOWizard heuristics
         if (this.db) {
-            // New logic: Check ANY scenario where hero_pos is the NEXT player in rotation
-            // and prev_action corresponds to a raise from US (pos).
-            // But we are trying to find buttons for US (pos).
-            // So we want to find raises R such that:
-            // "Scenario: NextPlayer vs US (US Raise R)" exists.
-            
-            // This confirms that if we Raise R, the next player has a node in the DB.
-            
-            // 1. Who is next?
-            // In a ring game, next player is just next in array.
-            const nextPos = this.getNextPosInOrbit(pos);
-            const nextDbPos = this.mapPositionToDB(nextPos);
-            
-            // 2. Who are we?
-            const myDbPos = this.mapPositionToDB(pos);
-            
-            // 3. Query: Find all "Raise X" actions that appear as 'prev_action' 
+            // Query: Find all "Raise X" actions that appear as 'prev_action' 
             // in a scenario where villain_pos = ME.
-            // (Note: villain_pos in DB scenarios is the aggressor we are facing).
-            
-            // Wait, this logic assumes the DB has nodes for EVERY player reacting to my raise.
-            // Yes, that is how the export script works (it traverses all paths).
+            const myDbPos = this.mapPositionToDB(pos);
             
             const query = `
                 SELECT DISTINCT prev_action 
@@ -740,7 +777,16 @@ class GTOTreeManager {
             const opts = [];
             while(stmt.step()) {
                 const row = stmt.getAsObject();
-                opts.push(row.prev_action);
+                const action = row.prev_action;
+                const amount = this.parseActionAmount(action);
+                
+                // Filter by context-appropriate sizes
+                if (amount !== null && amount >= minSize && amount <= maxSize) {
+                    opts.push(action);
+                } else if (action.includes('Allin') && raiseCount >= 3) {
+                    // All-in is appropriate for 5bet+ spots
+                    opts.push(action);
+                }
             }
             stmt.free();
             
@@ -756,9 +802,7 @@ class GTOTreeManager {
         }
         
         // Fallback to GTOWizard file heuristics if no custom DB options found
-        const history = this.getActionHistory(stepIndex);
-        const raises = history.filter(s => s.action.includes('Raise') || s.action.includes('Allin'));
-        const raiseCount = raises.length;
+        // (history, raises, raiseCount already defined at top of function)
 
         // RFI node: open size for this seat
         if (raiseCount === 0) {

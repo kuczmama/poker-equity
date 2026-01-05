@@ -9,7 +9,7 @@ class GTORenderer {
         this.colors = {
             'fold': '#4772b8',      // GTO Wizard Blue-ish Fold
             'call': '#2c9f45',      // Green (Call)
-            'raise': '#b93c3c',     // Red (Raise)
+            'raise': '#b93c3c',     // Red (Raise) - generic
             'raise_small': '#b93c3c', // Red (Small Raise)
             'raise_big': '#8a2323', // Darker Red (Big Raise/3bet)
             'all_in': '#6d1b1b',     // Deep Red (All-in)
@@ -19,22 +19,85 @@ class GTORenderer {
     }
 
     /**
+     * Get color for any action, including granular raise sizes like 'raise_7.5'
+     */
+    getColorForAction(action) {
+        // Direct match
+        if (this.colors[action]) {
+            return this.colors[action];
+        }
+        
+        // Handle granular raise sizes (raise_2.5, raise_7.5, raise_12, etc.)
+        if (action.startsWith('raise_')) {
+            const sizeStr = action.replace('raise_', '');
+            const size = parseFloat(sizeStr);
+            
+            if (!isNaN(size)) {
+                // Color gradient based on raise size:
+                // Small raises (2-4bb): Light red
+                // 3-bets (6-16bb): Medium red  
+                // 4-bets (18-30bb): Dark red
+                // 5-bets+ (30+bb): Deep red
+                if (size <= 4) return '#c94444';      // Light red (open raises)
+                if (size <= 16) return '#b93c3c';     // Medium red (3-bets)
+                if (size <= 30) return '#9a2b2b';     // Dark red (4-bets)
+                return '#7a1b1b';                      // Deep red (5-bets)
+            }
+            
+            // If we can't parse, use generic raise color
+            return this.colors['raise'];
+        }
+        
+        // Unknown action
+        return '#333';
+    }
+
+    /**
+     * Get sorting priority for action (lower = bottom of gradient)
+     */
+    getActionPriority(action) {
+        // Base priorities
+        const basePriority = {
+            'out_of_range': 0,
+            'fold': 10,
+            'call': 20,
+            'raise': 30,
+            'raise_small': 30,
+            'raise_big': 40,
+            'all_in': 50,
+            'raise_all_in': 50
+        };
+        
+        if (basePriority[action] !== undefined) {
+            return basePriority[action];
+        }
+        
+        // Handle granular raises - sort by size (smaller raises lower priority)
+        if (action.startsWith('raise_')) {
+            const sizeStr = action.replace('raise_', '');
+            const size = parseFloat(sizeStr);
+            if (!isNaN(size)) {
+                // Raises sorted by size: 30 (base) + size for ordering
+                return 30 + size;
+            }
+        }
+        
+        return 100; // Unknown at the end
+    }
+
+    /**
      * Generates the CSS background property for a mixed strategy
-     * @param {Object} freqs - e.g. { fold: 0.5, raise: 0.5 }
+     * @param {Object} freqs - e.g. { fold: 0.5, raise: 0.5, raise_7.5: 0.3 }
      */
     getBackgroundStyle(freqs) {
         if (!freqs) return this.colors['fold'];
-
-        // Sort actions by priority for consistent stacking
-        // Standard GTO Wiz stacking: Fold (bottom), Call, Raise (top)
-        const priority = ['out_of_range', 'fold', 'call', 'raise', 'raise_small', 'raise_big', 'all_in', 'raise_all_in'];
         
         const entries = Object.entries(freqs)
             .filter(([, pct]) => pct > 0.001) // Ignore < 0.1%
-            .sort((a, b) => priority.indexOf(a[0]) - priority.indexOf(b[0]));
+            .sort((a, b) => this.getActionPriority(a[0]) - this.getActionPriority(b[0]));
 
         if (entries.length === 0) return this.colors['fold'];
-        if (entries.length === 1) return this.colors[entries[0][0]] || this.colors['fold'];
+        if (entries.length === 1) return this.getColorForAction(entries[0][0]);
 
         // Build Gradient
         // We accumulate percentages to create hard stops
@@ -42,7 +105,7 @@ class GTORenderer {
         let currentPct = 0;
 
         entries.forEach(([action, pct]) => {
-            const color = this.colors[action] || '#333';
+            const color = this.getColorForAction(action);
             const endPct = currentPct + (pct * 100);
             
             gradientStops.push(`${color} ${currentPct}%`);
