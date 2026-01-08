@@ -158,15 +158,62 @@ class GTOTreeManager {
         
         // Update scenario title
         const titleEl = document.getElementById('current-scenario-title');
+        const activeStep = this.steps[this.currentStepIndex];
+
+        // Handle case where activeStep doesn't exist (end of action sequence)
+        if (!activeStep) {
+            if (titleEl) {
+                titleEl.textContent = 'Preflop Action Complete - Select Board to Continue';
+            }
+            const handInfo = document.getElementById('hand-info-content');
+            if (handInfo) {
+                handInfo.innerHTML = '<p class="text-gray-400">Betting round complete. Select flop cards to continue to postflop.</p>';
+            }
+            return; // Exit early
+        }
+
         if (titleEl) {
-            const activeStep = this.steps[this.currentStepIndex];
             if (context.isRFI) {
                 titleEl.textContent = `${activeStep.pos} RFI (Open Raise)`;
             } else {
                 titleEl.textContent = `${activeStep.pos} vs ${context.villainPos} ${context.prevAction}`;
             }
         }
-        
+
+        // Update metadata display
+        const metadata = this.getScenarioMetadata(activeStep.pos, context.villainPos, context.prevAction);
+        const sourceEl = document.getElementById('data-source');
+        const cfrInfoEl = document.getElementById('cfr-info');
+
+        if (metadata && sourceEl && cfrInfoEl) {
+            if (metadata.source === 'CFR') {
+                sourceEl.textContent = 'Source: CFR Computed';
+                sourceEl.className = 'text-green-400 font-semibold';
+
+                const algoEl = document.getElementById('cfr-algorithm');
+                const itersEl = document.getElementById('cfr-iterations');
+                const expEl = document.getElementById('cfr-exploitability');
+
+                if (algoEl) algoEl.textContent = metadata.algorithm.toUpperCase();
+                if (itersEl) itersEl.textContent = metadata.iterations.toLocaleString();
+                if (expEl) expEl.textContent = (metadata.exploitability * 100).toFixed(3);
+
+                cfrInfoEl.classList.remove('hidden');
+            } else if (metadata.source === 'GTOWizard') {
+                sourceEl.textContent = 'Source: GTOWizard Import';
+                sourceEl.className = 'text-blue-400';
+                cfrInfoEl.classList.add('hidden');
+            } else if (metadata.source === 'CFR (computing...)') {
+                sourceEl.textContent = 'Source: CFR (No Metadata)';
+                sourceEl.className = 'text-yellow-400';
+                cfrInfoEl.classList.add('hidden');
+            } else {
+                sourceEl.textContent = 'Source: Not Found';
+                sourceEl.className = 'text-gray-500';
+                cfrInfoEl.classList.add('hidden');
+            }
+        }
+
         // Setup edit mode handlers if in edit mode
         if (this.editMode) {
             this.setupEditModeHandlers();
@@ -442,6 +489,51 @@ class GTOTreeManager {
         const context = this.deriveContext();
         
         return this.getStrategyForContext(activePos, context.villainPos, context.prevAction, context.isRFI);
+    }
+
+    getScenarioMetadata(heroPos, villainPos, prevAction) {
+        if (!this.db) return null;
+
+        const heroCandidates = this.getHeroPosCandidates(heroPos);
+        const villainCandidates = this.getVillainPosCandidates(villainPos);
+
+        // Try to find scenario with CFR metadata
+        for (const dbHero of heroCandidates) {
+            for (const dbVillain of villainCandidates) {
+                const stmt = this.db.prepare(`
+                    SELECT sc.variant, cm.algorithm, cm.iterations, cm.exploitability
+                    FROM scenarios sc
+                    LEFT JOIN cfr_metadata cm ON sc.id = cm.scenario_id
+                    WHERE sc.hero_pos = ? AND sc.villain_pos = ? AND sc.prev_action = ?
+                    ORDER BY sc.variant DESC
+                    LIMIT 1
+                `);
+
+                stmt.bind([dbHero, dbVillain, prevAction]);
+
+                if (stmt.step()) {
+                    const row = stmt.getAsObject();
+                    stmt.free();
+
+                    if ((row.variant === 'CFR' || row.variant === 'Computed') && row.algorithm) {
+                        return {
+                            source: 'CFR',
+                            algorithm: row.algorithm,
+                            iterations: row.iterations,
+                            exploitability: row.exploitability
+                        };
+                    } else if (row.variant === 'Cash') {
+                        return { source: 'GTOWizard' };
+                    } else if (row.variant === 'CFR' || row.variant === 'Computed') {
+                        // CFR/Computed scenario but no metadata yet
+                        return { source: 'CFR (computing...)' };
+                    }
+                }
+                stmt.free();
+            }
+        }
+
+        return { source: 'Not Found' };
     }
 
     async getVillainStats(name) {
@@ -1083,13 +1175,17 @@ class GTOTreeManager {
             // If (Call) and (Raisers > 0) and (We are Big Blind or closing the betting)?
             // For charts, we usually stop at the call.
             
-            if (this.currentStepIndex < this.steps.length - 1) {
-                 this.currentStepIndex = stepIndex + 1;
+            // Check if we can advance to next step
+            const nextIndex = stepIndex + 1;
+            if (nextIndex < this.steps.length) {
+                this.currentStepIndex = nextIndex;
             } else {
-                 // End of line.
+                // End of action sequence - keep currentStepIndex at last valid step
+                // This will trigger the "Action Complete" message in updateView
+                this.currentStepIndex = this.steps.length;
             }
         }
-        
+
         this.updateView();
     }
 }

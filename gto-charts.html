@@ -73,6 +73,38 @@
             text-shadow: 0 1px 2px rgba(0,0,0,0.8);
         }
 
+        /* Board Card Slots */
+        .board-card-slot {
+            width: 50px;
+            height: 70px;
+            background: #2a2a2a;
+            border: 2px solid #4b5563;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 700;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .board-card-slot:hover {
+            border-color: #9ca3af;
+            transform: translateY(-2px);
+        }
+
+        .board-card-slot.filled {
+            border-color: #3b82f6;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .board-card-slot.filled:hover {
+            border-color: #60a5fa;
+        }
+
         /* Scrollbar */
         ::-webkit-scrollbar {
             width: 8px;
@@ -127,8 +159,22 @@
             
             <!-- Controls -->
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
-                <div class="flex justify-between items-center mb-4">
-                     <h2 id="current-scenario-title" class="text-lg font-bold text-white">Select Scenario</h2>
+                <div class="flex justify-between items-center mb-2">
+                     <div>
+                         <h2 id="current-scenario-title" class="text-lg font-bold text-white">Select Scenario</h2>
+                         <!-- CFR Metadata Display -->
+                         <div id="scenario-metadata" class="text-xs text-gray-400 mt-1 flex gap-3">
+                             <span id="data-source">Source: Loading...</span>
+                             <span id="cfr-info" class="hidden">
+                                 <span class="text-gray-600">|</span>
+                                 <span id="cfr-algorithm" class="text-gray-300"></span>
+                                 <span class="text-gray-600">|</span>
+                                 <span id="cfr-iterations" class="text-gray-300"></span> iters
+                                 <span class="text-gray-600">|</span>
+                                 Exp: <span id="cfr-exploitability" class="text-gray-300"></span>%
+                             </span>
+                         </div>
+                     </div>
                      <div class="flex gap-2">
                         <button id="copy-range-btn" class="text-gray-400 hover:text-blue-400" title="Copy Range">📋</button>
                         <button id="paste-range-btn" class="text-gray-400 hover:text-blue-400" title="Paste Range">📋➡📄</button>
@@ -159,6 +205,55 @@
                 <!-- Tree Steps (Flex Container) -->
                 <div id="tree-controls" class="flex gap-2 overflow-x-auto pb-2">
                     <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Postflop Board Selection -->
+            <div id="postflop-board-section" class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
+                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Postflop Board</h3>
+
+                <!-- Board Display -->
+                <div class="flex gap-4 items-center mb-3">
+                    <!-- Flop -->
+                    <div class="flex flex-col gap-1">
+                        <div class="text-xs text-gray-500 font-medium">Flop</div>
+                        <div class="flex gap-2">
+                            <div id="flop-card-1" class="board-card-slot" data-street="flop">?</div>
+                            <div id="flop-card-2" class="board-card-slot" data-street="flop">?</div>
+                            <div id="flop-card-3" class="board-card-slot" data-street="flop">?</div>
+                        </div>
+                    </div>
+
+                    <!-- Turn -->
+                    <div class="flex flex-col gap-1">
+                        <div class="text-xs text-gray-500 font-medium">Turn</div>
+                        <div id="turn-card" class="board-card-slot" data-street="turn">?</div>
+                    </div>
+
+                    <!-- River -->
+                    <div class="flex flex-col gap-1">
+                        <div class="text-xs text-gray-500 font-medium">River</div>
+                        <div id="river-card" class="board-card-slot" data-street="river">?</div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-2">
+                    <button id="select-flop-btn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors">
+                        Select Flop
+                    </button>
+                    <button id="select-turn-btn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed" disabled>
+                        Select Turn
+                    </button>
+                    <button id="select-river-btn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed" disabled>
+                        Select River
+                    </button>
+                    <button id="clear-board-btn" class="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-sm font-medium rounded transition-colors">
+                        Clear
+                    </button>
+                    <button id="solve-board-btn" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm font-bold rounded transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed ml-auto" disabled>
+                        🎯 Solve Board
+                    </button>
                 </div>
             </div>
 
@@ -238,6 +333,7 @@
     </div>
 
     <!-- Scripts -->
+    <link rel="stylesheet" href="card-picker.css">
     <script src="lib/sql-wasm.js"></script>
     <script src="pokersolver.js"></script>
     <script src="poker-logic.js"></script> <!-- Ensure PokerLogic/OddsCalculator is available if needed -->
@@ -245,6 +341,7 @@
     <script src="llm-service.js"></script>
     <script src="gto-renderer.js"></script>
     <script src="gto-tree-manager.js"></script>
+    <script src="card-picker.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', async () => {
              // Initialize GTO Tree Manager
@@ -252,6 +349,226 @@
              const llm = new LLMService();
              window.treeManager = new GTOTreeManager(renderer, llm);
              await window.treeManager.init();
+
+             // Initialize Card Picker for postflop board selection
+             const cardPicker = new CardPicker();
+             const boardState = {
+                 flop: [],
+                 turn: null,
+                 river: null
+             };
+
+             // Suit symbols and colors for display
+             const suitSymbols = {'s': '♠', 'h': '♥', 'd': '♦', 'c': '♣'};
+             const suitColors = {
+                 's': '#4a5568', // gray
+                 'h': '#c53030', // red
+                 'd': '#2b6cb0', // blue
+                 'c': '#38a169'  // green
+             };
+
+             function getAllBoardCards() {
+                 const cards = [...boardState.flop];
+                 if (boardState.turn) cards.push(boardState.turn);
+                 if (boardState.river) cards.push(boardState.river);
+                 return cards;
+             }
+
+             function updateBoardDisplay() {
+                 // Update flop cards
+                 for (let i = 0; i < 3; i++) {
+                     const slot = document.getElementById(`flop-card-${i + 1}`);
+                     const card = boardState.flop[i];
+                     if (card) {
+                         const rank = card[0];
+                         const suit = card[1];
+                         slot.innerHTML = `<span style="color: ${suitColors[suit]}">${suitSymbols[suit]}${rank}</span>`;
+                         slot.classList.add('filled');
+                     } else {
+                         slot.textContent = '?';
+                         slot.classList.remove('filled');
+                     }
+                 }
+
+                 // Update turn card
+                 const turnSlot = document.getElementById('turn-card');
+                 if (boardState.turn) {
+                     const rank = boardState.turn[0];
+                     const suit = boardState.turn[1];
+                     turnSlot.innerHTML = `<span style="color: ${suitColors[suit]}">${suitSymbols[suit]}${rank}</span>`;
+                     turnSlot.classList.add('filled');
+                 } else {
+                     turnSlot.textContent = '?';
+                     turnSlot.classList.remove('filled');
+                 }
+
+                 // Update river card
+                 const riverSlot = document.getElementById('river-card');
+                 if (boardState.river) {
+                     const rank = boardState.river[0];
+                     const suit = boardState.river[1];
+                     riverSlot.innerHTML = `<span style="color: ${suitColors[suit]}">${suitSymbols[suit]}${rank}</span>`;
+                     riverSlot.classList.add('filled');
+                 } else {
+                     riverSlot.textContent = '?';
+                     riverSlot.classList.remove('filled');
+                 }
+
+                 // Update button states
+                 const selectTurnBtn = document.getElementById('select-turn-btn');
+                 const selectRiverBtn = document.getElementById('select-river-btn');
+                 const solveBoardBtn = document.getElementById('solve-board-btn');
+
+                 // Can only select turn if flop is complete
+                 selectTurnBtn.disabled = boardState.flop.length !== 3;
+
+                 // Can only select river if turn is selected
+                 selectRiverBtn.disabled = !boardState.turn;
+
+                 // Can solve if at least flop is selected
+                 solveBoardBtn.disabled = boardState.flop.length !== 3;
+             }
+
+             // Select Flop button
+             document.getElementById('select-flop-btn').addEventListener('click', () => {
+                 const existingBoard = getAllBoardCards();
+                 cardPicker.show('flop', (selectedCards) => {
+                     boardState.flop = selectedCards;
+                     updateBoardDisplay();
+                 }, existingBoard);
+             });
+
+             // Select Turn button
+             document.getElementById('select-turn-btn').addEventListener('click', () => {
+                 const existingBoard = getAllBoardCards();
+                 cardPicker.show('turn', (selectedCards) => {
+                     boardState.turn = selectedCards[0];
+                     updateBoardDisplay();
+                 }, existingBoard);
+             });
+
+             // Select River button
+             document.getElementById('select-river-btn').addEventListener('click', () => {
+                 const existingBoard = getAllBoardCards();
+                 cardPicker.show('river', (selectedCards) => {
+                     boardState.river = selectedCards[0];
+                     updateBoardDisplay();
+                 }, existingBoard);
+             });
+
+             // Clear board button
+             document.getElementById('clear-board-btn').addEventListener('click', () => {
+                 boardState.flop = [];
+                 boardState.turn = null;
+                 boardState.river = null;
+                 updateBoardDisplay();
+             });
+
+             // Solve Board button - call backend API
+             document.getElementById('solve-board-btn').addEventListener('click', async () => {
+                 const boardCards = getAllBoardCards();
+                 console.log('Solving board:', boardCards);
+
+                 const btn = document.getElementById('solve-board-btn');
+                 const originalText = btn.innerHTML;
+                 btn.innerHTML = '⏳ Solving...';
+                 btn.disabled = true;
+
+                 try {
+                     // Get current scenario context for hero/villain positions
+                     const heroPos = window.treeManager?.context?.heroPos || 'BB';
+                     const villainPos = window.treeManager?.context?.villainPos || 'BTN';
+
+                     // Call backend API
+                     const response = await fetch('/solve-postflop', {
+                         method: 'POST',
+                         headers: {
+                             'Content-Type': 'application/json'
+                         },
+                         body: JSON.stringify({
+                             board_cards: boardCards,
+                             hero_pos: heroPos,
+                             villain_pos: villainPos,
+                             pot_bb: 10.0,  // Default pot size
+                             stack_bb: 90.0, // Default remaining stack
+                             iterations: 5000 // Quick solve for responsiveness
+                         })
+                     });
+
+                     if (!response.ok) {
+                         const error = await response.json();
+                         throw new Error(error.error || 'Solver failed');
+                     }
+
+                     const result = await response.json();
+                     console.log('Solver result:', result);
+
+                     // Display results in the GTO grid
+                     displayPostflopStrategy(result.hero_strategy);
+
+                     // Update scenario title
+                     const scenarioTitle = document.getElementById('current-scenario-title');
+                     const streetName = boardCards.length === 3 ? 'Flop' :
+                                        boardCards.length === 4 ? 'Turn' : 'River';
+                     scenarioTitle.textContent = `${heroPos} vs ${villainPos} - ${streetName}: ${boardCards.join(' ')}`;
+
+                     // Update metadata
+                     const dataSource = document.getElementById('data-source');
+                     dataSource.textContent = 'Source: Postflop Solver';
+                     dataSource.classList.remove('text-blue-400', 'text-green-400');
+                     dataSource.classList.add('text-purple-400');
+
+                     const cfrInfo = document.getElementById('cfr-info');
+                     document.getElementById('cfr-algorithm').textContent = 'CFR+';
+                     document.getElementById('cfr-iterations').textContent = result.iterations.toLocaleString();
+                     document.getElementById('cfr-exploitability').textContent = (result.exploitability).toFixed(6);
+                     cfrInfo.classList.remove('hidden');
+
+                     // Show success message in hand info panel
+                     const handInfoContent = document.getElementById('hand-info-content');
+                     handInfoContent.innerHTML = `
+                         <div class="space-y-2">
+                             <p class="text-green-400 font-bold">✓ Board Solved!</p>
+                             <p class="text-sm text-gray-400">
+                                 Exploitability: <span class="text-white">${(result.exploitability).toFixed(6)}%</span><br>
+                                 Compute time: <span class="text-white">${result.compute_time_seconds.toFixed(2)}s</span><br>
+                                 Iterations: <span class="text-white">${result.iterations.toLocaleString()}</span>
+                             </p>
+                             <p class="text-xs text-gray-500 italic mt-2">
+                                 Click any hand in the grid to see its strategy
+                             </p>
+                         </div>
+                     `;
+
+                 } catch (error) {
+                     console.error('Error solving board:', error);
+                     alert('Error solving board: ' + error.message);
+
+                     const handInfoContent = document.getElementById('hand-info-content');
+                     handInfoContent.innerHTML = `
+                         <p class="text-red-400">✗ Solver Error</p>
+                         <p class="text-sm text-gray-400 mt-2">${error.message}</p>
+                     `;
+                 } finally {
+                     btn.innerHTML = originalText;
+                     btn.disabled = false;
+                 }
+             });
+
+             // Helper function to display postflop strategy in the grid
+             function displayPostflopStrategy(strategy) {
+                 if (!window.treeManager || !window.treeManager.renderer) {
+                     console.error('Tree manager or renderer not available');
+                     return;
+                 }
+
+                 // Convert strategy to format expected by renderer
+                 // Strategy format: { "AA": {"fold": 0.1, "call": 0.3, "raise": 0.6}, ... }
+                 window.treeManager.renderer.render(strategy);
+             }
+
+             // Initialize display
+             updateBoardDisplay();
              
              // Edit Mode Button
              const editBtn = document.getElementById('edit-mode-btn');

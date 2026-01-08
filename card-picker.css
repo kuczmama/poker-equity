@@ -1,0 +1,255 @@
+/* Card Picker Modal Styles */
+
+.card-picker-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+
+.card-picker-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+}
+
+.card-picker-content {
+    position: relative;
+    background: #1a1a1a;
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 1100px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.card-picker-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 32px;
+    cursor: pointer;
+    padding: 8px;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.card-picker-close:hover {
+    opacity: 1;
+}
+
+.card-picker-title {
+    color: #fff;
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 24px 0;
+    text-align: center;
+}
+
+/* Selected cards display */
+.card-picker-selected {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    margin-bottom: 32px;
+}
+
+.card-picker-slot {
+    width: 80px;
+    height: 112px;
+    border: 3px solid #3b82f6;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #2a2a2a;
+}
+
+.card-back {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #2a4a2a 0%, #1a3a1a 100%);
+    background-image:
+        repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,.05) 10px, rgba(255,255,255,.05) 20px),
+        repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(0,0,0,.1) 10px, rgba(0,0,0,.1) 20px);
+}
+
+.selected-card {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+}
+
+.selected-card .card-suit {
+    font-size: 24px;
+    margin-bottom: 4px;
+}
+
+.selected-card .card-rank {
+    font-size: 32px;
+}
+
+/* Card grid */
+.card-picker-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.card-picker-row {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.card-picker-card {
+    width: 72px;
+    height: 64px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.card-picker-card:hover:not(.disabled):not(.selected) {
+    transform: translateY(-4px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+}
+
+.card-picker-card.selected {
+    box-shadow: 0 0 0 3px #3b82f6, 0 0 20px rgba(59, 130, 246, 0.5);
+    transform: scale(1.05);
+}
+
+.card-picker-card.disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.card-picker-card .card-suit {
+    font-size: 18px;
+    margin-bottom: 2px;
+}
+
+.card-picker-card .card-rank {
+    font-size: 28px;
+    line-height: 1;
+}
+
+/* Action buttons */
+.card-picker-actions {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+.card-picker-btn {
+    padding: 12px 32px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.card-picker-random {
+    background: #374151;
+    color: #fff;
+}
+
+.card-picker-random:hover {
+    background: #4b5563;
+}
+
+.card-picker-cancel {
+    background: #374151;
+    color: #fff;
+}
+
+.card-picker-cancel:hover {
+    background: #4b5563;
+}
+
+.card-picker-confirm {
+    background: #6b7280;
+    color: #9ca3af;
+}
+
+.card-picker-confirm.active {
+    background: #7f1d1d;
+    color: #fff;
+}
+
+.card-picker-confirm.active:hover {
+    background: #991b1b;
+}
+
+.card-picker-confirm:disabled {
+    cursor: not-allowed;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .card-picker-card {
+        width: 64px;
+        height: 56px;
+    }
+
+    .card-picker-card .card-rank {
+        font-size: 24px;
+    }
+
+    .card-picker-card .card-suit {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 768px) {
+    .card-picker-content {
+        padding: 16px;
+        max-width: 95vw;
+    }
+
+    .card-picker-card {
+        width: 48px;
+        height: 44px;
+    }
+
+    .card-picker-card .card-rank {
+        font-size: 18px;
+    }
+
+    .card-picker-card .card-suit {
+        font-size: 12px;
+    }
+
+    .card-picker-slot {
+        width: 60px;
+        height: 84px;
+    }
+}
