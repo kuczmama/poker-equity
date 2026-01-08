@@ -562,9 +562,9 @@
                      return;
                  }
 
-                 // Convert strategy to format expected by renderer
+                 // Use renderGrid method with no hand click callback (postflop is static display)
                  // Strategy format: { "AA": {"fold": 0.1, "call": 0.3, "raise": 0.6}, ... }
-                 window.treeManager.renderer.render(strategy);
+                 window.treeManager.renderer.renderGrid('gto-grid-container', strategy, null, false);
              }
 
              // Initialize display
