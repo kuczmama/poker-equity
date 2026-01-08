@@ -51,11 +51,14 @@ class GTOTreeManager {
             const isFuture = index > this.currentStepIndex;
             
             // Position button styling
-            let posClass = 'px-3 py-2 rounded-t text-xs font-bold transition-all ';
+            let posClass = 'px-3 py-2 rounded-t text-xs font-bold transition-all cursor-pointer ';
             if (isActive) {
                 posClass += 'bg-primary text-black';
             } else if (isPast && step.action) {
-                posClass += 'bg-gray-600 text-white';
+                posClass += 'bg-gray-600 text-white hover:bg-gray-500';
+            } else if (isFuture) {
+                // Make future positions look clickable with hover effect
+                posClass += 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white';
             } else {
                 posClass += 'bg-gray-700 text-gray-400 hover:bg-gray-600';
             }
@@ -131,8 +134,19 @@ class GTOTreeManager {
         container.querySelectorAll('button[data-pos]').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const index = parseInt(e.target.dataset.index);
+
                 if (index <= this.currentStepIndex) {
-                    // Allow clicking on past/current positions to navigate
+                    // Allow clicking on past/current positions to navigate back
+                    this.currentStepIndex = index;
+                    this.updateView();
+                } else if (index > this.currentStepIndex) {
+                    // QoL: Allow clicking future positions - auto-fold all intermediate players
+                    for (let i = this.currentStepIndex; i < index; i++) {
+                        if (!this.steps[i].action) {
+                            this.steps[i] = { pos: this.steps[i].pos, action: 'Fold' };
+                        }
+                    }
+                    // Jump to the clicked position
                     this.currentStepIndex = index;
                     this.updateView();
                 }
