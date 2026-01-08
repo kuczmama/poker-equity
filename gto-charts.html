@@ -210,7 +210,15 @@
 
             <!-- Postflop Board Selection -->
             <div id="postflop-board-section" class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
-                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Postflop Board</h3>
+                <div class="flex justify-between items-start mb-3">
+                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wide">Postflop Board</h3>
+
+                    <!-- Aggregate Action Breakdown (hidden until solved) -->
+                    <div id="action-breakdown" class="hidden text-xs space-y-1">
+                        <div class="text-gray-500 font-medium mb-1">Hero Actions:</div>
+                        <div id="action-stats"></div>
+                    </div>
+                </div>
 
                 <!-- Board Display -->
                 <div class="flex gap-4 items-center mb-3">
@@ -503,6 +511,10 @@
                      const result = await response.json();
                      console.log('Solver result:', result);
 
+                     // Calculate and display aggregate action breakdown
+                     const actionStats = calculateActionBreakdown(result.hero_strategy);
+                     displayActionBreakdown(actionStats);
+
                      // Display results in the GTO grid
                      displayPostflopStrategy(result.hero_strategy);
 
@@ -532,10 +544,12 @@
                              <p class="text-sm text-gray-400">
                                  Exploitability: <span class="text-white">${(result.exploitability).toFixed(6)}%</span><br>
                                  Compute time: <span class="text-white">${result.compute_time_seconds.toFixed(2)}s</span><br>
-                                 Iterations: <span class="text-white">${result.iterations.toLocaleString()}</span>
+                                 Iterations: <span class="text-white">${result.iterations.toLocaleString()}</span><br>
+                                 ${heroPos} range: <span class="text-white">${result.hero_range_size || 'N/A'} hands</span><br>
+                                 ${villainPos} range: <span class="text-white">${result.villain_range_size || 'N/A'} hands</span>
                              </p>
                              <p class="text-xs text-gray-500 italic mt-2">
-                                 Click any hand in the grid to see its strategy
+                                 Black cells = out of range (folded preflop)
                              </p>
                          </div>
                      `;
@@ -554,6 +568,87 @@
                      btn.disabled = false;
                  }
              });
+
+             // Calculate aggregate action breakdown from strategy
+             function calculateActionBreakdown(strategy) {
+                 const actionTotals = {};
+                 let totalHands = 0;
+
+                 // Sum up all actions across all hands
+                 for (const [hand, actions] of Object.entries(strategy)) {
+                     for (const [action, freq] of Object.entries(actions)) {
+                         if (freq > 0) {
+                             actionTotals[action] = (actionTotals[action] || 0) + freq;
+                             totalHands++;
+                         }
+                     }
+                 }
+
+                 // Normalize to percentages
+                 const numHands = Object.keys(strategy).length;
+                 const normalized = {};
+                 for (const [action, total] of Object.entries(actionTotals)) {
+                     normalized[action] = (total / numHands) * 100;
+                 }
+
+                 return normalized;
+             }
+
+             // Display action breakdown stats
+             function displayActionBreakdown(actionStats) {
+                 const breakdownEl = document.getElementById('action-breakdown');
+                 const statsEl = document.getElementById('action-stats');
+
+                 // Group actions by type
+                 const grouped = {
+                     fold: 0,
+                     check: 0,
+                     call: 0,
+                     bets: []
+                 };
+
+                 for (const [action, pct] of Object.entries(actionStats)) {
+                     if (action === 'fold') grouped.fold = pct;
+                     else if (action === 'check' || action === 'call') grouped.check += pct;
+                     else if (action.startsWith('raise') || action.startsWith('bet')) {
+                         grouped.bets.push({ action, pct });
+                     }
+                 }
+
+                 // Sort bets by size (extract number from action name)
+                 grouped.bets.sort((a, b) => {
+                     const aSize = parseFloat(a.action.replace(/[^0-9.]/g, '')) || 0;
+                     const bSize = parseFloat(b.action.replace(/[^0-9.]/g, '')) || 0;
+                     return bSize - aSize; // Descending
+                 });
+
+                 // Build HTML
+                 let html = '';
+
+                 if (grouped.check > 0) {
+                     html += `<div class="flex items-center gap-2">
+                         <div class="w-16 h-6 bg-green-600 rounded text-white text-xs flex items-center justify-center">Check</div>
+                         <span class="text-green-400 font-bold">${grouped.check.toFixed(2)}%</span>
+                     </div>`;
+                 }
+
+                 grouped.bets.forEach(({action, pct}) => {
+                     html += `<div class="flex items-center gap-2">
+                         <div class="w-16 h-6 bg-red-600 rounded text-white text-xs flex items-center justify-center">${action}</div>
+                         <span class="text-red-400 font-bold">${pct.toFixed(2)}%</span>
+                     </div>`;
+                 });
+
+                 if (grouped.fold > 0) {
+                     html += `<div class="flex items-center gap-2">
+                         <div class="w-16 h-6 bg-blue-600 rounded text-white text-xs flex items-center justify-center">Fold</div>
+                         <span class="text-blue-400 font-bold">${grouped.fold.toFixed(2)}%</span>
+                     </div>`;
+                 }
+
+                 statsEl.innerHTML = html;
+                 breakdownEl.classList.remove('hidden');
+             }
 
              // Helper function to display postflop strategy in the grid
              function displayPostflopStrategy(strategy) {

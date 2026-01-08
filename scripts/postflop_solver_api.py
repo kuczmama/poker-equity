@@ -240,6 +240,15 @@ def solve_postflop_board(
         iterations=iterations
     )
 
+    # Mark hands not in range as 'out_of_range' for UI display
+    all_hands = generate_all_169_hands()
+    hero_hands_set = set(hero_hands)
+
+    # Add out_of_range entries for hands not in the preflop range
+    for hand in all_hands:
+        if hand not in hero_hands_set and hand not in result.hero_strategy:
+            result.hero_strategy[hand] = {'out_of_range': 1.0}
+
     # Return results as JSON-serializable dict
     return {
         'board': board_cards,
@@ -251,7 +260,9 @@ def solve_postflop_board(
         'iterations': result.iterations,
         'compute_time_seconds': result.compute_time_seconds,
         'pot_bb': pot_bb,
-        'stack_bb': stack_bb
+        'stack_bb': stack_bb,
+        'hero_range_size': len(hero_hands),
+        'villain_range_size': len(villain_hands)
     }
 
 if __name__ == '__main__':
