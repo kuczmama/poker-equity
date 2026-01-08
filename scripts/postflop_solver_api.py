@@ -10,9 +10,109 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import sqlite3
 import json
-from typing import Dict, List, Tuple, Any
+import hashlib
+from typing import Dict, List, Tuple, Any, Optional
 from scripts.cfr_solver_wrapper import run_cfr_solver, CFRResult
 from scripts.cfr_range_builder import generate_all_169_hands, build_poker_solver_range
+
+def generate_cache_key(
+    board_cards: List[str],
+    hero_pos: str,
+    villain_pos: str,
+    pot_bb: float,
+    stack_bb: float,
+    iterations: int
+) -> str:
+    """
+    Generate unique cache key for a postflop solve.
+
+    Key includes all parameters that affect the solution.
+    """
+    # Sort board cards for consistency (As Kh Qd == Qd Kh As)
+    sorted_board = sorted(board_cards)
+
+    # Create deterministic string representation
+    key_str = f"{'-'.join(sorted_board)}|{hero_pos}|{villain_pos}|{pot_bb}|{stack_bb}|{iterations}"
+
+    # Hash for cleaner storage
+    return hashlib.sha256(key_str.encode()).hexdigest()
+
+def get_cached_result(cache_key: str, db_path: str) -> Optional[Dict[str, Any]]:
+    """
+    Check if a solve result exists in cache.
+
+    Returns:
+        Cached result dict if found, None otherwise
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT board_cards, hero_pos, villain_pos, pot_bb, stack_bb,
+               hero_strategy, villain_strategy, exploitability,
+               compute_time_seconds, iterations, hero_range_size, villain_range_size
+        FROM postflop_cache
+        WHERE cache_key = ?
+    """, (cache_key,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    # Parse JSON strategies
+    return {
+        'board': json.loads(row[0]),
+        'hero_pos': row[1],
+        'villain_pos': row[2],
+        'pot_bb': row[3],
+        'stack_bb': row[4],
+        'hero_strategy': json.loads(row[5]),
+        'villain_strategy': json.loads(row[6]),
+        'exploitability': row[7],
+        'compute_time_seconds': row[8],
+        'iterations': row[9],
+        'hero_range_size': row[10],
+        'villain_range_size': row[11],
+        'cached': True  # Flag to indicate this came from cache
+    }
+
+def save_to_cache(
+    cache_key: str,
+    result: Dict[str, Any],
+    db_path: str
+) -> None:
+    """
+    Save solve result to cache.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT OR REPLACE INTO postflop_cache
+        (cache_key, board_cards, hero_pos, villain_pos, pot_bb, stack_bb,
+         iterations, hero_strategy, villain_strategy, exploitability,
+         compute_time_seconds, hero_range_size, villain_range_size)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        cache_key,
+        json.dumps(result['board']),
+        result['hero_pos'],
+        result['villain_pos'],
+        result['pot_bb'],
+        result['stack_bb'],
+        result['iterations'],
+        json.dumps(result['hero_strategy']),
+        json.dumps(result['villain_strategy']),
+        result['exploitability'],
+        result['compute_time_seconds'],
+        result.get('hero_range_size'),
+        result.get('villain_range_size')
+    ))
+
+    conn.commit()
+    conn.close()
 
 def card_to_solver_format(card: str) -> int:
     """
@@ -148,10 +248,11 @@ def solve_postflop_board(
     pot_bb: float = 10.0,
     stack_bb: float = 90.0,
     iterations: int = 5000,
-    db_path: str = 'data/gto.db'
+    db_path: str = 'data/gto.db',
+    use_cache: bool = True
 ) -> Dict[str, Any]:
     """
-    Solve a postflop board on-demand.
+    Solve a postflop board on-demand with caching.
 
     Args:
         board_cards: List of board cards (e.g., ['As', 'Kh', 'Qd'] for flop)
@@ -161,10 +262,21 @@ def solve_postflop_board(
         stack_bb: Remaining stack in big blinds
         iterations: CFR iterations (default 5000 for speed)
         db_path: Path to database with preflop ranges
+        use_cache: Check cache before solving (default True)
 
     Returns:
         Dictionary with hero/villain strategies and metadata
     """
+    # Generate cache key
+    cache_key = generate_cache_key(board_cards, hero_pos, villain_pos, pot_bb, stack_bb, iterations)
+
+    # Check cache first
+    if use_cache:
+        cached_result = get_cached_result(cache_key, db_path)
+        if cached_result:
+            print(f"✓ Cache hit! Board: {board_cards} (saved {cached_result['compute_time_seconds']:.1f}s)")
+            return cached_result
+
     # Board cards should be kept as strings (e.g., ["As", "Kh", "Qd"])
     # The solver expects string format, not integers
 
@@ -249,8 +361,8 @@ def solve_postflop_board(
         if hand not in hero_hands_set and hand not in result.hero_strategy:
             result.hero_strategy[hand] = {'out_of_range': 1.0}
 
-    # Return results as JSON-serializable dict
-    return {
+    # Prepare result dict
+    solve_result = {
         'board': board_cards,
         'hero_pos': hero_pos,
         'villain_pos': villain_pos,
@@ -262,8 +374,16 @@ def solve_postflop_board(
         'pot_bb': pot_bb,
         'stack_bb': stack_bb,
         'hero_range_size': len(hero_hands),
-        'villain_range_size': len(villain_hands)
+        'villain_range_size': len(villain_hands),
+        'cached': False
     }
+
+    # Save to cache for future use
+    if use_cache:
+        save_to_cache(cache_key, solve_result, db_path)
+        print(f"✓ Saved to cache: {cache_key[:8]}...")
+
+    return solve_result
 
 if __name__ == '__main__':
     # Test

@@ -538,12 +538,16 @@
 
                      // Show success message in hand info panel
                      const handInfoContent = document.getElementById('hand-info-content');
+                     const cacheStatus = result.cached ?
+                         '<span class="text-blue-400">⚡ From cache</span>' :
+                         '<span class="text-green-400">🔥 Freshly computed</span>';
+
                      handInfoContent.innerHTML = `
                          <div class="space-y-2">
-                             <p class="text-green-400 font-bold">✓ Board Solved!</p>
+                             <p class="text-green-400 font-bold">✓ Board Solved! ${cacheStatus}</p>
                              <p class="text-sm text-gray-400">
                                  Exploitability: <span class="text-white">${(result.exploitability).toFixed(6)}%</span><br>
-                                 Compute time: <span class="text-white">${result.compute_time_seconds.toFixed(2)}s</span><br>
+                                 Compute time: <span class="text-white">${result.compute_time_seconds.toFixed(2)}s</span>${result.cached ? ' (original)' : ''}<br>
                                  Iterations: <span class="text-white">${result.iterations.toLocaleString()}</span><br>
                                  ${heroPos} range: <span class="text-white">${result.hero_range_size || 'N/A'} hands</span><br>
                                  ${villainPos} range: <span class="text-white">${result.villain_range_size || 'N/A'} hands</span>
