@@ -1,0 +1,2 @@
+# PostgreSQL adapter for PokerTracker 4 database integration
+psycopg2-binary>=2.9.11

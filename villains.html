@@ -160,12 +160,17 @@
                         colorClass = 'text-orange-500 font-bold';
                         archetype = 'NIT (ORANGE)';
                 }
-                // 3. GREEN (Fish / Whale)
+                // 3. YELLOW (TAG / Regular)
+                else if (vpip >= 15 && vpip < 23 && (vpip - pfr) < 6 && threeBet >= 4 && threeBet <= 10) {
+                    colorClass = 'text-yellow-500 font-bold';
+                    archetype = 'TAG (YELLOW)';
+                }
+                // 4. GREEN (Fish / Whale)
                 else if (vpip > 35 && (vpip - pfr) > 15) {
                     colorClass = 'text-green-600 font-bold';
                     archetype = 'FISH (GREEN)';
                 }
-                // 4. LIGHT BLUE (Passive Reg)
+                // 5. LIGHT BLUE (Passive Reg)
                 else if (vpip >= 20 && vpip <= 28 && pfr < 18) {
                     colorClass = 'text-blue-400 font-bold';
                     archetype = 'PASSIVE (BLUE)';
