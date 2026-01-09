@@ -160,19 +160,27 @@ class GTOTreeManager {
         
         // Get strategy for current state
         const strategy = this.getStrategyForCurrentState();
-        
+
         // Determine if this is a subset range (facing action vs RFI)
         const context = this.deriveContext();
         const isSubsetRange = !context.isRFI;
+
+        // Store context for external access (e.g., postflop solver)
+        const activeStep = this.steps[this.currentStepIndex];
+        if (activeStep) {
+            this.context = {
+                ...context,
+                heroPos: activeStep.pos
+            };
+        }
         
         // Update the grid
         this.renderer.renderGrid('gto-grid-container', strategy, (hand) => {
             this.onHandClick(hand);
         }, isSubsetRange);
-        
+
         // Update scenario title
         const titleEl = document.getElementById('current-scenario-title');
-        const activeStep = this.steps[this.currentStepIndex];
 
         // Handle case where activeStep doesn't exist (end of action sequence)
         if (!activeStep) {
@@ -696,7 +704,7 @@ class GTOTreeManager {
 
         // Try to find scenario, preferring CFR data (native 7-max) over Cash (GTO Wizard 9-max adapted)
         let scenarioId = null;
-        const variants = ['CFR', 'Cash']; // Priority order: CFR first, GTO Wizard as fallback
+        const variants = ['Computed', 'CFR', 'Cash']; // Priority: Computed > CFR > GTO Wizard
         
         for (const variant of variants) {
             if (scenarioId) break;
